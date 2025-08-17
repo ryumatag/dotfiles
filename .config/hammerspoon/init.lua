@@ -43,6 +43,9 @@ local hotkeys = {
   hotkey.new({ "cmd", "ctrl" }, "k", function()
     toggle("org.mozilla.firefoxdeveloperedition")
   end),
+  hotkey.new({ "cmd", "ctrl" }, "h", function()
+    toggle("com.openai.chat")
+  end),
 
   -- For window management around, powered by `yabai`, a tiling window manager
   -- for macOS.

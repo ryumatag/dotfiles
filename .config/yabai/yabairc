@@ -5,7 +5,7 @@
 
 # Exclude all applications except Alacritty and Firefox from
 yabai -m rule \
-  --add app!="^(Alacritty|Firefox Developer Edition)$" manage=off
+  --add app!="^(Alacritty|Firefox Developer Edition|ChatGPT)$" manage=off
 yabai -m rule --apply
 
 # Global settings
