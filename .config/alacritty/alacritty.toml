@@ -6,7 +6,7 @@ import = [
 [window]
 decorations = "Buttonless" # macOS exclusive
 option_as_alt = "Both" # macOS exclusive
-opacity = 0.80
+opacity = 1.0
 blur = true
 
 [scrolling]
