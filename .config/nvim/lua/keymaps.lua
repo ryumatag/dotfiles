@@ -45,8 +45,8 @@ map("n", "#", "#zz", { silent = true })
 map("n", "g*", "g*zz", { silent = true })
 
 -- jump to start/end of line using home row keys
-map("n", "<S-h>", "^")
-map("n", "<S-l>", "$")
+map({ "n", "v" }, "<S-h>", "^")
+map({ "n", "v" }, "<S-l>", "$")
 
 -- switch between buffers
 map("n", "<C-n>", "<cmd>bn<cr>", { silent = true })
@@ -82,3 +82,6 @@ map("n", "?", "?\\v")
 map("n", "/", "/\\v")
 map("c", "%s/", "%sm/")
 
+-- don't be such an over-pager when paging
+map({ "n", "v" }, "<C-f>", "<C-d>", { silent = true })
+map({ "n", "v" }, "<C-b>", "<C-u>", { silent = true })
