@@ -660,4 +660,43 @@ return {
       require("scrollbar.handlers.gitsigns").setup()
     end,
   },
+
+  {
+    "MeanderingProgrammer/render-markdown.nvim",
+    opts = {
+      code = {
+        sign = false,
+        style = "normal",
+        width = "block",
+        min_width = 79,
+        left_pad = 1,
+        right_pad = 1,
+        border = "thin",
+      },
+      heading = {
+        sign = false,
+        width = "block",
+        left_pad = 2,
+        right_pad = 2,
+        icons = {},
+        border = true,
+        border_virtual = true,
+        backgrounds = {
+          "RenderMarkdownH1Bg",
+          "RenderMarkdownH1Bg",
+          "RenderMarkdownH1Bg",
+          "RenderMarkdownH1Bg",
+          "RenderMarkdownH1Bg",
+          "RenderMarkdownH1Bg",
+        },
+      },
+      checkbox = {
+        enabled = false,
+      },
+    },
+    ft = { "markdown", "norg", "rmd", "org", "codecompanion" },
+    config = function(_, opts)
+      require("render-markdown").setup(opts)
+    end,
+  },
 }
