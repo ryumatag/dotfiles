@@ -39,6 +39,7 @@ starship:
 tmux:
 	mkdir -p $(XDG_CONFIG_HOME)/tmux
 	ln -sf $(DOTFILES_CONFIG_HOME)/tmux/tmux.conf $(XDG_CONFIG_HOME)/tmux/tmux.conf
+	ln -sf $(DOTFILES_CONFIG_HOME)/tmux/tmux-popup.conf $(XDG_CONFIG_HOME)/tmux/tmux-popup.conf
 
 yabai:
 	mkdir -p $(XDG_CONFIG_HOME)/yabai
