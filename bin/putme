@@ -1,0 +1,114 @@
+#!/bin/bash
+set -euo pipefail
+
+# CSV without header: char,name,desc
+list=$(cat <<'EOF'
+«,laquo,left angle quote
+°,deg,degree sign
+±,plusmn,plus/minus
+»,raquo,right angle quote
+–,ndash,en dash
+—,mdash,em dash
+…,ellip,ellipsis
+←,larr,left arrow
+↑,uarr,up arrow
+→,rarr,right arrow
+↓,darr,down arrow
+↔,lrarr,left-right arrow
+↕,udarr,up-down arrow
+⇐,lArr,left double arrow
+⇑,uArr,up double arrow
+⇒,rArr,right double arrow
+⇓,dArr,down double arrow
+≠,neq,not equal
+≤,le,less or equal
+≥,ge,greater or equal
+☐,checkbox,ballot box
+☑,checkbox_on,ballot box with check
+✓,check,check mark
+EOF
+)
+
+usage() {
+  cat <<EOF
+Usage:
+  $(basename "$0")          Select a symbol via fzf
+  $(basename "$0") <name>   Print the corresponding symbol
+
+Available characters:
+EOF
+
+  printf '%s\n' "$list" \
+    | awk -F',' '{ printf "  %-12s %-3s %s\n", $2, $1, $3 }'
+}
+
+# fzf preview mode: reads a single CSV line from stdin
+if [[ "${1-}" == "--preview" ]]; then
+  # read the whole line including spaces
+  if ! IFS= read -r line; then
+    exit 0
+  fi
+
+  IFS=',' read -r char name desc <<<"$line"
+
+  printf 'char      : %s\n' "$char"
+  printf 'name      : %s\n' "$name"
+
+  # Unicode codepoints (use python for correctness)
+  cps=$(python3 - "$char" <<'PY'
+import sys
+s = sys.argv[1]
+print(" ".join(f"U+{ord(ch):04X}" for ch in s))
+PY
+)
+  printf 'codepoint : %s\n' "$cps"
+
+  # UTF-8 bytes
+  bytes=$(printf '%s' "$char" | hexdump -ve '1/1 "0x%02X "')
+  printf 'bytes     : %s\n' "$bytes"
+
+  printf 'desc      : %s\n' "$desc"
+  exit 0
+fi
+
+# Argument validation
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+pick=""
+
+# Name lookup mode
+if [[ $# -eq 1 ]]; then
+  name="$1"
+
+  if [[ "$name" == "-h" || "$name" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+
+  pick=$(printf '%s\n' "$list" \
+    | awk -F',' -v name="$name" '$2 == name {print; exit}')
+
+  if [[ -z "$pick" ]]; then
+    printf 'Unknown symbol name: %s\n\n' "$name" >&2
+    usage >&2
+    exit 1
+  fi
+
+else
+  # Interactive fzf selection
+  pick=$(printf '%s\n' "$list" \
+    | fzf \
+        --prompt='symbol> ' \
+        --height=40% \
+        --reverse \
+        --delimiter=',' \
+        --with-nth=1,2,3 \
+        --preview="printf '%s\n' {} | $0 --preview" \
+  ) || exit 1
+fi
+
+IFS=',' read -r char _ <<<"$pick"
+printf '%s' "$char"
