@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $(basename "$0") <dir> [dep...]" >&2
+    exit 1
+fi
+
+dir="$1"
+shift   # remaining args become dependency names
+
+# Create project directory
+mkdir -p "$dir"
+cd "$dir"
+
+name="$(basename "$(realpath .)")"
+
+# Guard: don't overwrite existing files by accident
+for f in Cargo.toml main.rs; do
+    if [[ -e "$f" ]]; then
+        echo "Error: $PWD already contains $f" >&2
+        exit 1
+    fi
+done
+
+# .gitignore
+cat > .gitignore <<'EOF'
+/target
+EOF
+
+# main.rs
+cat > main.rs <<'EOF'
+fn main() -> anyhow::Result<()> {
+    println!("Hello, world!");
+    Ok(())
+}
+EOF
+
+# Cargo.toml
+cat > Cargo.toml <<EOF
+[package]
+name = "$name"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "$name"
+path = "main.rs"
+
+[dependencies]
+EOF
+
+# rustfmt.toml
+init-rustfmt
+
+# Add anyhow and other dependencies
+cargo add anyhow
+for deps; do
+    cargo add "$deps"
+done
+
+echo "Created simple binary \`$name\` package"
