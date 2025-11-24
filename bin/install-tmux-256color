@@ -1,27 +1,102 @@
-#!/bin/sh
+#!/bin/bash
+set -euo pipefail
 
-# https://gist.github.com/bbqtd/a4ac060d6f6b9ea6fe3aabe735aa9d95#the-right-way
+# Install tmux-256color terminfo on macOS following:
+# https://gist.github.com/bbqtd/a4ac060d6f6b9ea6fe3aabe735aa9d95
+#
+# Default: installs into the current user's terminfo database (~/.terminfo).
+# Use --global to install into the system database (/usr/share/terminfo) via
+# sudo.
 
-set -e
+usage() {
+  cat <<'EOF'
+Usage: tmux-256color-install.sh [--global]
 
-if [ ! -x /usr/bin/tic ]; then
+  --global   Install terminfo entries into the system database
+             (runs `/usr/bin/tic` via sudo). Otherwise installs
+             into the current user's ~/.terminfo.
+
+The script will:
+  * Verify that `tic` is /usr/bin/tic (system ncurses).
+  * Download terminfo.src from invisible-island.net.
+  * Compile the tmux-256color terminfo entry.
+  * Verify that tmux-256color is available via `infocmp -x tmux-256color`.
+EOF
+}
+
+GLOBAL=0
+
+while [ "${1-}" != "" ]; do
+  case "$1" in
+    --global)
+      GLOBAL=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Basic sanity checks
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "This script is intended for macOS (Darwin)." >&2
   exit 1
 fi
 
-tmpdir=$(mktemp -d)
-trap 'rm -r "$tmpdir"' EXIT
+# If tmux-256color is already available, nothing to do.
+if infocmp -x tmux-256color >/dev/null 2>&1; then
+  echo "tmux-256color terminfo already present; nothing to do."
+  exit 0
+fi
 
-printf "downloading the latest ncurses terminfo files and unpacking them... "
+tic_path="$(command -v tic || true)"
+if [ -z "$tic_path" ]; then
+  echo "tic(1) not found in PATH." >&2
+  exit 1
+fi
 
-curl -L https://invisible-island.net/datafiles/current/terminfo.src.gz 2>/dev/null | gunzip > "$tmpdir/terminfo.src"
+if [ "$tic_path" != "/usr/bin/tic" ]; then
+  echo "Expected /usr/bin/tic but found: $tic_path" >&2
+  echo "Per the original guide, make sure to use the macOS ncurses tic" >&2
+  echo "(e.g. adjust PATH or uninstall a Homebrew/MacPorts ncurses)." >&2
+  exit 1
+fi
 
-printf "downloaded (%s/terminfo.src)\n" "$tmpdir"
-printf "  this source file will be removed after the installation automatically\n"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
 
-printf "compiling tmux-256color terminal info... "
-/usr/bin/tic -xe tmux-256color "$tmpdir/terminfo.src"
-printf "compiled\n"
+cd "$tmpdir"
 
-printf "\n=== infocmp -x tmux-256color ===\n"
-infocmp tmux-256color
-printf "===============================\n"
+echo "Downloading latest terminfo.src from invisible-island.net..."
+curl -fsSLO "https://invisible-island.net/datafiles/current/terminfo.src.gz"
+
+echo "Unpacking terminfo.src.gz..."
+gunzip terminfo.src.gz
+
+# Compile only tmux-256color as in the gist's example.
+echo "Compiling tmux-256color terminfo entry..."
+
+if [ "$GLOBAL" -eq 1 ]; then
+  echo "Installing into system terminfo database via sudo..."
+  sudo /usr/bin/tic -xe tmux-256color terminfo.src
+else
+  echo "Installing into user terminfo database (~/.terminfo)..."
+  /usr/bin/tic -xe tmux-256color terminfo.src
+fi
+
+echo "Verifying tmux-256color installation..."
+if ! infocmp -x tmux-256color >/dev/null 2>&1; then
+  echo "tmux-256color still not found after installation." >&2
+  echo "Something went wrong; please check the output above." >&2
+  exit 1
+fi
+
+echo
+echo "tmux-256color terminfo installed successfully."
