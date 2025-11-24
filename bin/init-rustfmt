@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+dest="rustfmt.toml"
+
+if [[ -e "$dest" ]]; then
+    echo "rustfmt.toml already exists" >&2
+    exit 1
+fi
+
+cat > "$dest" <<'EOF'
+# Limit formatted lines to 79 characters.
+# This follows the traditional 80-column style used in many Unix tools,
+# making diffs easier to read and avoiding overly long lines in terminals.
+max_width = 79
+# Make all width-based "small heuristics" equal to `max_width`.
+# This means constructs like function calls, struct literals, arrays, and
+# certain one-line `if` expressions are kept on a single line as long as they
+# fit within `max_width`.
+use_small_heuristics = "max"
+EOF
+
+echo "Created $dest"
