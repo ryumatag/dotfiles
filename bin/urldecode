@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+import sys
+import urllib.parse
+
+def main():
+    # Read entire stdin and strip a single trailing newline so the decoded
+    # output does not accidentally carry an extra line break.
+    text = sys.stdin.read().rstrip("\n")
+
+    # Decode percent-encoded sequences according to RFC 3986.
+    # This reverses urllib.parse.quote(), restoring characters from %XX
+    # escapes.
+    decoded = urllib.parse.unquote(text)
+
+    print(decoded, end="")
+
+if __name__ == "__main__":
+    main()
