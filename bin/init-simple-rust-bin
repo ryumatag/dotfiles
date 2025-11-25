@@ -1,9 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+usage() {
+  echo "Usage: $(basename "$0") <dir> [dep...]"
+}
+
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $(basename "$0") <dir> [dep...]" >&2
-    exit 1
+  usage >&2
+  exit 1
 fi
 
 dir="$1"
@@ -17,10 +21,10 @@ name="$(basename "$(realpath .)")"
 
 # Guard: don't overwrite existing files by accident
 for f in Cargo.toml main.rs; do
-    if [[ -e "$f" ]]; then
-        echo "Error: $PWD already contains $f" >&2
-        exit 1
-    fi
+  if [[ -e "$f" ]]; then
+    echo "Error: $PWD already contains $f" >&2
+    exit 1
+  fi
 done
 
 # .gitignore
@@ -57,7 +61,7 @@ init-rustfmt
 # Add anyhow and other dependencies
 cargo add anyhow
 for deps; do
-    cargo add "$deps"
+  cargo add "$deps"
 done
 
 echo "Created simple binary \`$name\` package"
