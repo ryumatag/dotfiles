@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# install-mozc-macos
+#
+# Builds and installs Mozc for macOS from source using Bazelisk.
+#
+#   * Clones https://github.com/google/mozc
+#   * Builds bundled Qt (required for tools like ConfigDialog)
+#   * Builds Mozc.pkg with Bazelisk and installs it
+#   * Re-signs Mozc.app recursively to fix dyld "different Team IDs" / Library
+#     Validation issues
+#
+# Requirements:
+#
+#   * macOS on Apple Silicon (arm64) assumed (works on Intel too in principle)
+#   * Xcode (full) installed (xcodebuild must exist)
+#   * Homebrew recommended (to install bazelisk/cmake/ninja)
+#
+# Usage:
+#
+#   install-mozc-macos
+#   MOZC_WORKDIR="$HOME/.local/src" install-mozc-macos
+#   MOZC_REPO_DIR="$HOME/.local/clones/google/mozc" install-mozc-macos
+
+log() { printf '%s\n' "$*" >&2; }
+die() { log "error: $*"; exit 1; }
+
+# Configurable paths
+: "${MOZC_WORKDIR:=$HOME/.local/clones/google}"
+: "${MOZC_REPO_DIR:=$MOZC_WORKDIR/mozc}"
+: "${MOZC_BRANCH:=master}"
+: "${MOZC_INPUT_METHOD_APP:=/Library/Input Methods/Mozc.app}"
+
+# Preflight
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  die "this script is for macOS only"
+fi
+
+cmd-exists git
+cmd-exists python3
+
+# Full Xcode is required for Qt's CMake checks (xcodebuild must be available).
+if ! xcrun -find xcodebuild >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+error: xcodebuild not found.
+
+Mozc's Qt build step requires full Xcode (not only Command Line Tools).
+Install Xcode (App Store), then run:
+  sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
+
+After that, verify:
+  xcrun -find xcodebuild
+  xcodebuild -version
+EOF
+  exit 1
+fi
+
+# Homebrew toolchain (recommended).
+# We don't force Homebrew, but we do require cmake/ninja/bazelisk to exist.
+if cmd-exists brew; then
+  log "Homebrew detected. Ensuring required packages are installed..."
+  brew list bazelisk >/dev/null 2>&1 || brew install bazelisk
+  brew list cmake >/dev/null 2>&1 || brew install cmake
+  brew list ninja >/dev/null 2>&1 || brew install ninja
+else
+  log "Homebrew not found. Make sure these commands exist in PATH:"
+  log "  bazelisk, cmake, ninja"
+fi
+
+cmd-exists bazelisk
+cmd-exists cmake
+cmd-exists ninja
+cmd-exists xcrun
+
+# Clone/update
+if [[ -d "$MOZC_REPO_DIR/.git" ]]; then
+  log "Updating existing repo: $MOZC_REPO_DIR"
+  git -C "$MOZC_REPO_DIR" fetch --all --prune
+  git -C "$MOZC_REPO_DIR" checkout "$MOZC_BRANCH"
+  git -C "$MOZC_REPO_DIR" pull --ff-only
+else
+  log "Cloning mozc into: $MOZC_REPO_DIR"
+  mkdir -p "$MOZC_WORKDIR"
+  git clone \
+    --branch "$MOZC_BRANCH" \
+    --depth 1 \
+    https://github.com/google/mozc.git "$MOZC_REPO_DIR"
+fi
+
+SRC_DIR="$MOZC_REPO_DIR/src"
+[[ -d "$SRC_DIR" ]] || die "src directory not found: $SRC_DIR"
+cd "$SRC_DIR"
+
+# Mozc build tools use requests to download dependencies.
+# Keep system clean: install into a venv inside the repo.
+VENV_DIR="$SRC_DIR/.venv-mozc"
+if [[ ! -d "$VENV_DIR" ]]; then
+  log "Creating venv: $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+fi
+
+# shellcheck disable=SC1091
+source "$VENV_DIR/bin/activate"
+python3 -m pip install --upgrade pip >/dev/null
+python3 -m pip install --upgrade requests >/dev/null
+
+# Fetch third_party deps
+log "Running update_deps.py"
+python3 build_tools/update_deps.py
+
+# Build Qt (bundled)
+#
+# The docs commonly use third_party/qt, but some setups output qt_host for host
+# tools. Prefer third_party/qt if present, otherwise fall back.
+log "Building Qt (bundled) for Mozc tools"
+python3 build_tools/build_qt.py --release --confirm_license
+
+QT_PATH_CAND1="$SRC_DIR/third_party/qt"
+QT_PATH_CAND2="$SRC_DIR/third_party/qt_host"
+if [[ -d "$QT_PATH_CAND1" ]]; then
+  export MOZC_QT_PATH="$QT_PATH_CAND1"
+elif [[ -d "$QT_PATH_CAND2" ]]; then
+  export MOZC_QT_PATH="$QT_PATH_CAND2"
+else
+  die "Qt install directory not found (expected $QT_PATH_CAND1 or $QT_PATH_CAND2)"
+fi
+log "MOZC_QT_PATH=$MOZC_QT_PATH"
+
+# Build package with Bazelisk
+log "Building Mozc.pkg with Bazelisk"
+bazelisk build package --config oss_macos --config release_build
+
+PKG_PATH="$SRC_DIR/bazel-bin/mac/Mozc.pkg"
+if [[ ! -f "$PKG_PATH" ]]; then
+  die "Mozc.pkg not found at expected path: $PKG_PATH"
+fi
+
+# Install package
+log "Installing package: $PKG_PATH"
+sudo installer -pkg "$PKG_PATH" -target /
+
+if [[ ! -d "$MOZC_INPUT_METHOD_APP" ]]; then
+  die "Mozc.app not found after install: $MOZC_INPUT_METHOD_APP"
+fi
+
+# Fix code-signing / dyld Team ID mismatch
+#
+# On newer macOS, nested apps/frameworks inside Mozc.app may have inconsistent
+# signatures, causing ConfigDialog to crash with:
+#   mapping process and mapped file (non-platform) have different Team IDs
+#
+# Re-sign everything ad-hoc with a consistent identity.
+log "Removing quarantine attributes (if any)"
+sudo xattr -dr com.apple.quarantine "$MOZC_INPUT_METHOD_APP" 2>/dev/null || true
+
+log "Re-signing nested frameworks/apps/xpc (ad-hoc) to make signatures consistent"
+sudo find "$MOZC_INPUT_METHOD_APP" -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" \) -print0 \
+  | sudo xargs -0 -I{} codesign --force --sign - --timestamp=none "{}"
+
+log "Re-signing top-level Mozc.app"
+sudo codesign --force --deep --sign - --timestamp=none "$MOZC_INPUT_METHOD_APP"
+
+log "Verifying signature (best-effort; Gatekeeper may still say 'rejected' for ad-hoc)"
+codesign --verify --deep --strict --verbose=2 "$MOZC_INPUT_METHOD_APP" || true
+spctl --assess --type execute "$MOZC_INPUT_METHOD_APP" || true
+
+cat >&2 <<EOF
+
+Done.
+
+Next steps:
+1) Log out and log back in (or reboot). Input Methods are often picked up at login.
+2) Open:
+   System Settings -> Keyboard -> Text Input -> Input Sources
+   Add "Mozc" (Japanese).
+3) If ConfigDialog still doesn't open, check:
+   $MOZC_INPUT_METHOD_APP/Contents/Resources/ConfigDialog.app
+
+Repo location:
+  $MOZC_REPO_DIR
+
+Package built at:
+  $PKG_PATH
+EOF
