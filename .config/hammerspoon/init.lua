@@ -59,7 +59,6 @@ local hotkeys = {
     )
   end),
   hotkey.new({ "cmd" }, ",", function()
-    print("cmd-,")
     local script = [[
       yabai=/opt/homebrew/bin/yabai
       jq=/opt/homebrew/bin/jq

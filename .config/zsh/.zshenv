@@ -82,10 +82,6 @@ if cmd-exists bat; then
   export BAT_THEME="base16"
 fi
 
-if cmd-exists docker; then
-  export DOCKER_CONFIG="${XDG_CONFIG_HOME}/docker"
-fi
-
 if cmd-exists fzf; then
   export FZF_TMUX_OPTS="-p 80%"
   export FZF_DEFAULT_COMMAND="fd --type file --follow"

@@ -1,6 +1,7 @@
 [user]
   name = Ryuma Taguchi
   email = ryumatag@gmail.com
+  signingkey = ryumatag@gmail.com
 
 [core]
   editor = nvim
@@ -15,6 +16,9 @@
 
 [init]
   defaultBranch = main
+
+[commit]
+  gpgsign = true
 
 [merge]
   ff = false
