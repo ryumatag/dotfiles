@@ -18,16 +18,16 @@ history = 0 # I'm in tmux all the time
 # italic = { family = "Iosevka Term SS09", style = "Extended Italic" }
 # bold_italic = { family = "Iosevka Term SS09", style = "Bold Extended Italic" }
 normal = { family = "Hack Nerd Font" }
-size = 13.5
+size = 13.0
 offset = { y = 3 }
 
 [colors]
 transparent_background_colors = true
 
 [mouse]
-# temporarily hide mouse cursor when typing
+# Temporarily hide mouse cursor when typing
 hide_when_typing = true
-# disable default mouse bindings
+# Disable default mouse bindings
 bindings = [
   { mouse = "Left", action = "None" },
   { mouse = "Right", action = "ReceiveChar" },
@@ -35,7 +35,7 @@ bindings = [
 ]
 
 [keyboard]
-# disable a bunch of default keybindings
+# Disable a bunch of default keybindings.
 bindings = [
   #{ key = "Paste", action = "ReceiveChar" },
   #{ key = "Copy", action = "ReceiveChar" },
@@ -45,7 +45,7 @@ bindings = [
   { key = "Space", mods = "Shift|Control", mode = "~Search", action = "ReceiveChar" },
   # macOS exclusive
   { key = "K", mods = "Command", mode = "~Vi|~Search", action = "ReceiveChar" },
-  # { key = "0", mods = "Command", action = "ReceiveChar" },
+  #{ key = "0", mods = "Command", action = "ReceiveChar" },
   #{ key = "=", mods = "Command", action = "ReceiveChar" },
   #{ key = "+", mods = "Command", action = "ReceiveChar" },
   #{ key = "NumpadAdd", mods = "Command", action = "ReceiveChar" },
