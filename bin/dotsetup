@@ -1,0 +1,95 @@
+#!/bin/sh
+set -eu
+
+# Setup and update helper for this dotfiles repository.
+#
+# Responsibilities:
+# * Ensure the dotfiles repository is present and up to date
+# * Apply symlinks via dotlink
+# * Ensure Rust and required Cargo tools are installed
+#
+# This script is intended to be idempotent: safe to run multiple times.
+
+DOTFILES_DIR=${DOTFILES_DIR:-"$HOME/.dotfiles"}
+DOTFILES_REPO=${DOTFILES_REPO:-"https://github.com/ryumatag/dotfiles"}
+DOTLINK="$DOTFILES_DIR/bin/dotlink"
+CRATES_LIST_FILE="$DOTFILES_DIR/cargo-install.txt"
+
+say() { printf "%s\n" "$*"; }
+
+die() { printf "error: %s\n" "$*" >&2; exit 1; }
+
+# Clone or update dotfiles repository.
+if [ -d "$DOTFILES_DIR/.git" ]; then
+  say "dotfiles: updating $DOTFILES_DIR"
+  git -C "$DOTFILES_DIR" remote set-url origin "$DOTFILES_REPO" >/dev/null 2>&1 || true
+  git -C "$DOTFILES_DIR" fetch --prune origin
+
+  # Prefer fast-forward only.
+  branch=$(git -C "$DOTFILES_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  git -C "$DOTFILES_DIR" pull --ff-only origin "$branch"
+else
+  say "dotfiles: cloning into $DOTFILES_DIR"
+  git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+fi
+
+# Place scripts into ~/.local/bin, and set up XDG config symlinks.
+[ -x "$DOTLINK" ] || die "dotlink not found or not executable: $DOTLINK"
+say "dotlink: linking"
+"$DOTLINK" link
+
+# Install Rust toolchain via rustup if missing.
+if command -v rustup >/dev/null 2>&1; then
+  say "rust: rustup already installed"
+  return 0
+fi
+
+say "rust: installing rustup"
+
+# rustup installs to ~/.cargo and typically updates PATH via shell init.
+# We source nothing here; instead we try to use the installed binaries by
+# absolute paths.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+if [ -x "$HOME/.cargo/bin/rustup" ]; then
+  "$HOME/.cargo/bin/rustup" default stable
+fi
+
+# Resolve cargo executable without relying on a newly loaded shell rc.
+if command -v cargo >/dev/null 2>&1; then
+  CARGO=cargo
+elif [ -x "$HOME/.cargo/bin/cargo" ]; then
+  CARGO="$HOME/.cargo/bin/cargo"
+else
+  say "cargo: not found; skipping crate installs"
+  return 0
+fi
+
+if [ ! -f "$CRATES_LIST_FILE" ]; then
+  say "cargo: crates list not found; skipping: $CRATES_LIST_FILE"
+  return 0
+fi
+
+say "cargo: installing crates from $CRATES_LIST_FILE"
+
+# Format: one crate per line.
+# * Empty lines and lines starting with # are ignored.
+# * Extra arguments per line are allowed (e.g., "--locked", "--features ...").
+#
+# Examples:
+#   ripgrep
+#   bat --locked
+#   cargo-edit --locked
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    ""|\#*) continue ;;
+  esac
+
+  # shellcheck disable=SC2086
+  set -- $line
+  crate=$1
+  shift || true
+
+  say "cargo: install $crate $*"
+  "$CARGO" install "$crate" "$@"
+done <"$CRATES_LIST_FILE"
