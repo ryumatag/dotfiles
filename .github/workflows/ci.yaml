@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Prepare fake HOME
         shell: bash
@@ -106,5 +106,5 @@ jobs:
 
           # Run dotlink through the symlinked command path.
           "$LOCAL_BIN/dotlink" status
-          "$LOCAL_BIN/dotlink" unlink
           "$LOCAL_BIN/dotlink" prune
+          "$LOCAL_BIN/dotlink" unlink
