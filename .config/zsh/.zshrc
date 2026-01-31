@@ -21,14 +21,12 @@ setopt nonomatch
 unsetopt flow_control
 unsetopt list_beep
 
+# Prompt
+[ -f "$XDG_CONFIG_HOME/zsh/prompt.zsh" ] && . "$XDG_CONFIG_HOME/zsh/prompt.zsh"
+
 # Auto-start tmux only on interactive TTY sessions.
 if [[ -z "$TMUX" ]] && cmd-exists tmux && [[ -t 0 ]]; then
   exec tmux new -As "stuff"
-fi
-
-# Prompt
-if cmd-exists starship; then
-  eval "$(starship init zsh)"
 fi
 
 # fzf integration (zsh)
