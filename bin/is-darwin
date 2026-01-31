@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Detect macOS
+[ "$(uname -s 2>/dev/null)" = "Darwin" ]
