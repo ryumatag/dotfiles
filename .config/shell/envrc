@@ -17,12 +17,6 @@ export MANPAGER='nvim +Man!'
 # Go
 export GOPATH="$XDG_DATA_HOME/go"
 
-# starship
-if cmd-exists starship; then
-  export STARSHIP_CONFIG="${XDG_CONFIG_HOME}/starship/starship.toml"
-  export STARSHIP_CACHE="${XDG_CACHE_HOME}/starship"
-fi
-
 # bat
 if cmd-exists bat; then
   export BAT_THEME="base16"

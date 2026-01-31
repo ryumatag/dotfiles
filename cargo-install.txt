@@ -6,7 +6,6 @@ git-delta
 hyperfine
 oha
 ripgrep
-starship
 xsv
 
 cargo-expand

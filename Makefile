@@ -4,7 +4,7 @@ DOTFILES_CONFIG_HOME := $(DOTFILES_HOME)/.config
 
 .DEFAULT_GOAL := all
 
-.PHONY: alacritty git hammerspoon karabiner nvim starship tmux yabai zsh all
+.PHONY: alacritty git hammerspoon karabiner nvim tmux yabai zsh all
 
 alacritty:
 	mkdir -p $(XDG_CONFIG_HOME)/alacritty
@@ -32,10 +32,6 @@ nvim:
 	ln -sfn $(DOTFILES_CONFIG_HOME)/nvim/lua $(XDG_CONFIG_HOME)/nvim/lua
 	ln -sf $(DOTFILES_CONFIG_HOME)/nvim/lazy-lock.json $(XDG_CONFIG_HOME)/nvim/lazy-lock.json
 
-starship:
-	mkdir -p $(XDG_CONFIG_HOME)/starship
-	ln -sf $(DOTFILES_CONFIG_HOME)/starship/starship.toml $(XDG_CONFIG_HOME)/starship/starship.toml
-
 tmux:
 	mkdir -p $(XDG_CONFIG_HOME)/tmux
 	ln -sf $(DOTFILES_CONFIG_HOME)/tmux/tmux.conf $(XDG_CONFIG_HOME)/tmux/tmux.conf
@@ -61,4 +57,4 @@ zsh:
 		touch $(XDG_CONFIG_HOME)/zsh/.zshrc.local; \
 	fi
 
-all: alacritty git hammerspoon karabiner nvim starship tmux yabai zsh
+all: alacritty git hammerspoon karabiner nvim tmux yabai zsh
