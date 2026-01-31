@@ -1,0 +1,311 @@
+#!/bin/sh
+set -eu
+
+# Resolve this script's real path (follow symlinks) so DOTFILES_ROOT is stable.
+SELF=$0
+while [ -L "$SELF" ]; do
+  target=$(readlink "$SELF")
+  # shellcheck disable=SC1007
+  case "$target" in
+    /*) SELF=$target ;;
+    *)  SELF=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)/$target ;;
+  esac
+done
+
+# shellcheck disable=SC1007
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+# shellcheck disable=SC1007
+DOTFILES_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+WORK_DOTFILES_ROOT=${WORK_DOTFILES_ROOT:-"$HOME/work/dotfiles"}
+
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
+LOCAL_BIN=${LOCAL_BIN:-"$HOME/.local/bin"}
+
+BACKUP_DIR="$DOTFILES_ROOT/.backup/$(date "+%Y%m%d-%H%M%S")"
+
+usage() {
+  cat <<EOF
+Manage symlinks for dotfiles repository located at $DOTFILES_ROOT.
+
+Usage: $(basename "$0") <command>
+
+Commands:
+  link     Create symlinks (backs up existing files into $(dirname "$BACKUP_DIR"))
+  unlink   Remove symlinks created by dotlink (only current targets)
+  status   Check expected symlinks
+  prune    Remove broken symlinks that were pointing into dotfiles/work-dotfiles
+EOF
+}
+
+say() { printf "%s\n" "$*"; }
+
+die() { printf "error: %s\n" "$*" >&2; exit 1; }
+
+ensure_dir() { [ -d "$1" ] || mkdir -p "$1"; }
+
+backup_if_needed() {
+  dest=$1
+
+  # Replace an existing symlink unconditionally.
+  # This makes repeated runs idempotent and avoids stale link targets.
+  if [ -L "$dest" ]; then
+    rm -f "$dest"
+    return 0
+  fi
+
+  # If a regular file/directory exists, move it out of the way.
+  if [ -e "$dest" ]; then
+    ensure_dir "$BACKUP_DIR"
+    say "backup $dest -> $BACKUP_DIR/"
+    mv "$dest" "$BACKUP_DIR/"
+  fi
+}
+
+# Resolve source path considering work overlay.
+#
+# Work overlay is enabled only when:
+# * the repo-local is-work script exists and reports "work machine", and
+# * $WORK_DOTFILES_ROOT exists, and
+# * the source path is within $DOTFILES_ROOT, and
+# * the corresponding path exists in $WORK_DOTFILES_ROOT.
+resolve_src() {
+  src=$1
+
+  if [ ! -x "$DOTFILES_ROOT/bin/is-work" ]; then
+    printf '%s' "$src"
+    return 0
+  fi
+
+  # Call "$DOTFILES_ROOT/bin/is-work" directly to avoid depending on PATH
+  # during the first bootstrap run.
+  "$DOTFILES_ROOT/bin/is-work" || { printf '%s' "$src"; return 0; }
+  [ -d "$WORK_DOTFILES_ROOT" ] || { printf '%s' "$src"; return 0; }
+
+  case "$src" in
+    "$DOTFILES_ROOT"/*)
+      rel=${src#"$DOTFILES_ROOT"/}
+      src_work="$WORK_DOTFILES_ROOT/$rel"
+      if [ -e "$src_work" ]; then
+        printf '%s' "$src_work"
+        return 0
+      fi
+      ;;
+  esac
+
+  printf '%s' "$src"
+}
+
+link_one() {
+  src=$(resolve_src "$1")
+  dest=$2
+
+  ensure_dir "$(dirname "$dest")"
+  backup_if_needed "$dest"
+  ln -s "$src" "$dest"
+  say "link   $dest -> $src"
+}
+
+unlink_one() {
+  dest=$1
+  if [ -L "$dest" ]; then
+    rm -f "$dest"
+    say "unlink $dest"
+  fi
+}
+
+status_one() {
+  src=$(resolve_src "$1")
+  dest=$2
+
+  if [ ! -e "$dest" ]; then
+    say "MISS  $dest"
+    return 1
+  fi
+
+  if [ -L "$dest" ]; then
+    got=$(readlink "$dest" 2>/dev/null || true)
+    if [ "$got" = "$src" ]; then
+      say "OK    $dest -> $got"
+      return 0
+    fi
+    say "DIFF  $dest -> $got (expected $src)"
+    return 1
+  fi
+
+  say "FILE  $dest (not a symlink)"
+  return 1
+}
+
+# Enumerate entries under $DOTFILES_ROOT/.config and invoke callback as:
+#   callback <name> <src> <dest>
+#
+# This links the entire directory/file entry as-is (directory symlinks are fine).
+for_each_config_entry() {
+  cb=$1
+
+  for src in "$DOTFILES_ROOT/.config/"*; do
+    [ -e "$src" ] || continue
+    name=$(basename "$src")
+    dest="$XDG_CONFIG_HOME/$name"
+    "$cb" "$name" "$src" "$dest"
+  done
+}
+
+_cb_link_config() {
+  link_one "$2" "$3"
+}
+
+_cb_unlink_config() {
+  unlink_one "$3"
+}
+
+_cb_status_config() {
+  status_one "$2" "$3" || FAIL=1
+}
+
+# Link all entries under .config/ into ~/.config/.
+link_config() {
+  ensure_dir "$XDG_CONFIG_HOME"
+
+  for_each_config_entry _cb_link_config
+
+  # zsh bootstrap: keep .zshenv in $HOME so ZDOTDIR works before ~/.config/zsh
+  # is even consulted.
+  link_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv"
+}
+
+# Remove only the symlinks for entries that currently exist in this repo.
+#
+# If a config entry was removed from the repo, the corresponding symlink might
+# remain; use "prune" to clean up broken leftovers.
+unlink_config() {
+  for_each_config_entry _cb_unlink_config
+  unlink_one "$HOME/.zshenv"
+}
+
+status_config() {
+  FAIL=0
+  for_each_config_entry _cb_status_config
+  status_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv" || FAIL=1
+  return "$FAIL"
+}
+
+# Link every regular file under dotfiles/bin into ~/.local/bin.
+link_bin() {
+  ensure_dir "$LOCAL_BIN"
+
+  for s in "$DOTFILES_ROOT/bin/"*; do
+    [ -f "$s" ] || continue
+    name=$(basename "$s")
+    link_one "$s" "$LOCAL_BIN/$name"
+  done
+}
+
+# Remove only the symlinks for scripts that currently exist in dotfiles/bin.
+# For leftovers after removal, use "prune".
+unlink_bin() {
+  for s in "$DOTFILES_ROOT/bin/"*; do
+    [ -f "$s" ] || continue
+    name=$(basename "$s")
+    unlink_one "$LOCAL_BIN/$name"
+  done
+}
+
+status_bin() {
+  fail=0
+  for s in "$DOTFILES_ROOT/bin/"*; do
+    [ -f "$s" ] || continue
+    name=$(basename "$s")
+    dest="$LOCAL_BIN/$name"
+    [ -L "$dest" ] || { say "MISS  $dest"; fail=1; }
+  done
+  return "$fail"
+}
+
+# Remove ONLY broken symlinks under ~/.config that were pointing into
+# $DOTFILES_ROOT/.config/ or $WORK_DOTFILES_ROOT/.config/.
+#
+# This approximates "remove configs deleted from dotfiles" because removing
+# a config entry from the repo typically breaks the corresponding symlink.
+prune_config() {
+  for p in "$XDG_CONFIG_HOME"/*; do
+    [ -L "$p" ] || continue
+    [ -e "$p" ] && continue
+
+    target=$(readlink "$p" 2>/dev/null || true)
+
+    case "$target" in
+      "$DOTFILES_ROOT/.config/"* )
+        rm -f "$p"
+        say "prune  $p"
+        ;;
+      "$WORK_DOTFILES_ROOT/.config/"* )
+        rm -f "$p"
+        say "prune  $p"
+        ;;
+    esac
+  done
+
+  # Also prune $HOME/.zshenv if it became a broken link pointing into dotfiles.
+  if [ -L "$HOME/.zshenv" ] && [ ! -e "$HOME/.zshenv" ]; then
+    target=$(readlink "$HOME/.zshenv" 2>/dev/null || true)
+    case "$target" in
+      "$DOTFILES_ROOT/.config/zsh/.zshenv" | "$WORK_DOTFILES_ROOT/.config/zsh/.zshenv" )
+        rm -f "$HOME/.zshenv"
+        say "prune  $HOME/.zshenv"
+        ;;
+    esac
+  fi
+}
+
+# Remove ONLY broken symlinks under ~/.local/bin that were pointing into
+# $DOTFILES_ROOT/bin/ or $WORK_DOTFILES_ROOT/bin/.
+prune_bin() {
+  for p in "$LOCAL_BIN"/*; do
+    [ -L "$p" ] || continue
+    [ -e "$p" ] && continue
+
+    target=$(readlink "$p" 2>/dev/null || true)
+
+    case "$target" in
+      "$DOTFILES_ROOT/bin/"* )
+        rm -f "$p"
+        say "prune  $p"
+        ;;
+      "$WORK_DOTFILES_ROOT/bin/"* )
+        rm -f "$p"
+        say "prune  $p"
+        ;;
+    esac
+  done
+}
+
+cmd=${1:-help}
+case "$cmd" in
+  link)
+    # Link binaries first so repo-local helper scripts are available early.
+    link_bin
+    link_config
+    ;;
+  unlink)
+    unlink_bin
+    unlink_config
+    ;;
+  status)
+    fail=0
+    status_config || fail=1
+    status_bin || fail=1
+    exit "$fail"
+    ;;
+  prune)
+    prune_bin
+    prune_config
+    ;;
+  help|--help|-h|"")
+    usage
+    ;;
+  *)
+    die "unrecognized command: $cmd"
+    ;;
+esac

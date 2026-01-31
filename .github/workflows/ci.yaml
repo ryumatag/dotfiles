@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dotlink:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        work_overlay: [false, true]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare fake HOME
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_home/.config"
+          mkdir -p "$GITHUB_WORKSPACE/_home/.local/bin"
+          mkdir -p "$GITHUB_WORKSPACE/_workdotfiles"
+
+      - name: Prepare work overlay fixture (only when enabled)
+        if: ${{ matrix.work_overlay == true }}
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+
+          # Enable "work machine" detection for bin/is-work (current policy: marker file).
+          mkdir -p "$XDG_CONFIG_HOME/dotfiles"
+          touch "$XDG_CONFIG_HOME/dotfiles/is-work"
+
+          # Create minimal work dotfiles structure (same layout as the personal repo).
+          # Only override one config entry to assert overlay selection.
+          mkdir -p "$WORK_DOTFILES_ROOT/.config/git"
+          echo "work-overlay" > "$WORK_DOTFILES_ROOT/.config/git/CI_WORK_OVERLAY_MARKER"
+
+      - name: dotlink link/status/unlink/prune (repo path)
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          LOCAL_BIN: ${{ github.workspace }}/_home/.local/bin
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+
+          # Link via repo-local dotlink.
+          ./bin/dotlink link
+
+          # Basic expectations.
+          test -L "$XDG_CONFIG_HOME/zsh"
+          test -L "$XDG_CONFIG_HOME/nvim"
+          test -L "$HOME/.zshenv"
+
+          # Overlay assertion (only when enabled).
+          if [ "${{ matrix.work_overlay }}" = "true" ]; then
+            # Git config should be linked from work dotfiles when present.
+            got=$(readlink "$XDG_CONFIG_HOME/git")
+            exp="$WORK_DOTFILES_ROOT/.config/git"
+            test "$got" = "$exp"
+
+            # And the marker file should be visible through the symlink.
+            test -f "$XDG_CONFIG_HOME/git/CI_WORK_OVERLAY_MARKER"
+          else
+            # When overlay is off, git should point to the personal repo.
+            got=$(readlink "$XDG_CONFIG_HOME/git")
+            exp="$(pwd)/.config/git"
+            test "$got" = "$exp"
+          fi
+
+          # Status should succeed.
+          ./bin/dotlink status
+
+          # Unlink then status should fail (expected).
+          ./bin/dotlink unlink
+          if ./bin/dotlink status; then
+            echo "status unexpectedly succeeded after unlink"
+            exit 1
+          fi
+
+          # Prune should not error even if nothing to prune.
+          ./bin/dotlink prune
+
+      - name: dotlink via symlink in LOCAL_BIN (regression for symlink loops)
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          LOCAL_BIN: ${{ github.workspace }}/_home/.local/bin
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+
+          # Re-link to recreate ~/.local/bin/dotlink.
+          ./bin/dotlink link
+
+          # Run dotlink through the symlinked command path.
+          "$LOCAL_BIN/dotlink" status
+          "$LOCAL_BIN/dotlink" unlink
+          "$LOCAL_BIN/dotlink" prune
