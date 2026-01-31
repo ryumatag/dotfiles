@@ -1,0 +1,157 @@
+# Aliases and interactive wrappers shared by bash/zsh
+
+# Guard: do nothing in non-interactive shells
+case "$-" in
+  *i*) ;;
+  *) return ;;
+esac
+
+# Simple aliases
+alias less='less -R'
+alias grep='grep --color=auto'
+alias pd='popd'
+alias vim='nvim'
+
+# Colored man output (portable escape codes)
+man() {
+  env \
+    LESS_TERMCAP_mb="$(printf '\033[1;31m')" \
+    LESS_TERMCAP_md="$(printf '\033[1;31m')" \
+    LESS_TERMCAP_me="$(printf '\033[0m')" \
+    LESS_TERMCAP_se="$(printf '\033[0m')" \
+    LESS_TERMCAP_so="$(printf '\033[1;44;33m')" \
+    LESS_TERMCAP_ue="$(printf '\033[0m')" \
+    LESS_TERMCAP_us="$(printf '\033[0;32m')" \
+    man "$@"
+}
+
+mkcd() {
+  [ -n "$1" ] || { echo "mkcd: missing operand" >&2; return 2; }
+  mkdir -p -- "$1" && cd -- "$1" || return 1
+}
+
+paths() {
+  if [ "$#" -gt 0 ]; then
+    printf '%s\n' "$1" | tr ':' '\n'
+  else
+    tr ':' '\n'
+  fi
+}
+
+# Extract the "path argument" from an ls invocation.
+#
+# Rules:
+# * If "--" is present, the first arg after it is treated as the path (if any).
+# * Otherwise, the last non-option arg is treated as the path.
+# * If no path is found, it means "current directory".
+__ls_extract_target() {
+  target=''
+  after_ddash=0
+
+  for a in "$@"; do
+    if [ "$after_ddash" -eq 1 ]; then
+      target=$a
+      break
+    fi
+
+    if [ "$a" = "--" ]; then
+      after_ddash=1
+      continue
+    fi
+
+    case "$a" in
+      -*) : ;;          # option
+      *)  target=$a ;;  # non-option (candidate path)
+    esac
+  done
+
+  # Print target (empty means "no explicit path")
+  printf '%s' "$target"
+}
+
+# Return success if the resolved ls target is exactly $HOME.
+# * No explicit path => treat as $PWD; match if PWD == HOME.
+# * Explicit path => match "~", "~/", "$HOME", "$HOME/".
+__ls_is_home_target() {
+  target="$(__ls_extract_target "$@")"
+
+  if [ -z "$target" ]; then
+    [ "$PWD" = "$HOME" ]
+    return $?
+  fi
+
+  # shellcheck disable=SC2088
+  # Expand "~" and "~/" manually (bash/zsh portable)
+  case "$target" in
+    "~")    target=$HOME ;;
+    "~/"*)  target=$HOME/${target#~/} ;;
+  esac
+
+  # Normalize trailing slash
+  case "$target" in
+    */) target=${target%/} ;;
+  esac
+
+  [ "$target" = "$HOME" ]
+}
+
+# Base ls options
+_LS_BASE_OPTS='-N --color=auto --group-directories-first'
+# Home directory entries to hide (macOS junk folders)
+_LS_HOME_IGNORES_EZA='Desktop|Documents|Downloads|Library|Movies|Music|Pictures|Public|.CFUserTextEncoding|.DS_Store|.Trash|'
+_LS_HOME_IGNORES_LS='-I Desktop -I Documents -I Downloads -I Library -I Movies -I Music -I Pictures -I Public -I .CFUserTextEncoding -I .DS_Store -I .Trash'
+
+# ls / la / ll (eza preferred)
+if cmd-exists eza; then
+  ls() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      command eza --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    else
+      command eza --git "$@"
+    fi
+  }
+
+  la() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      command eza -a --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    else
+      command eza -a --git "$@"
+    fi
+  }
+
+  ll() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      command eza -ahl --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    else
+      command eza -ahl --git "$@"
+    fi
+  }
+else
+  ls() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      # shellcheck disable=SC2086
+      command ls $_LS_BASE_OPTS $_LS_HOME_IGNORES_LS "$@"
+    else
+      # shellcheck disable=SC2086
+      command ls $_LS_BASE_OPTS "$@"
+    fi
+  }
+
+  la() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      # shellcheck disable=SC2086
+      command ls -a $_LS_HOME_IGNORES_LS "$@"
+    else
+      command ls -a "$@"
+    fi
+  }
+
+  ll() {
+    if is-darwin && __ls_is_home_target "$@"; then
+      # shellcheck disable=SC2086
+      command ls -ahl $_LS_HOME_IGNORES_LS "$@"
+    else
+      command ls -ahl "$@"
+    fi
+  }
+fi

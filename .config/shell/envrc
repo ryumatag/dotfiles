@@ -1,0 +1,41 @@
+# Environment variables shared by bash/zsh
+
+# XDG Base Directory specification
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state"
+
+# Disable less history
+export LESSHISTFILE="-"
+
+export TERMINFO_DIRS="${XDG_DATA_HOME}/terminfo${TERMINFO_DIRS:+:$TERMINFO_DIRS}"
+
+export EDITOR="nvim"
+export MANPAGER='nvim +Man!'
+
+# Go
+export GOPATH="$XDG_DATA_HOME/go"
+
+# starship
+if cmd-exists starship; then
+  export STARSHIP_CONFIG="${XDG_CONFIG_HOME}/starship/starship.toml"
+  export STARSHIP_CACHE="${XDG_CACHE_HOME}/starship"
+fi
+
+# bat
+if cmd-exists bat; then
+  export BAT_THEME="base16"
+fi
+
+# fzf (shared defaults; shell-specific keybinds are in bashrc/zshrc)
+if cmd-exists fzf; then
+  export FZF_TMUX_OPTS="-p 80%"
+  export FZF_DEFAULT_COMMAND="fd --type file --follow"
+  export FZF_DEFAULT_OPTS="
+    --color='dark,gutter:-1,pointer:red'
+    --multi
+    --height=40%
+    --border='sharp'
+  "
+fi
