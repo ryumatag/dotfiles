@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+# Return 0 on work machine, 1 otherwise.
+#
+# Policy:
+# - Prefer an explicit marker file. This avoids accidental matches and does not
+#   depend on device identifiers.
+# - If the marker is missing, return "not work" (fail closed).
+
+MARKER="$XDG_CONFIG_HOME/dotfiles/is-work"
+
+if [ -f "$MARKER" ]; then
+  exit 0
+fi
+
+exit 1
