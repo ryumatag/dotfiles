@@ -40,9 +40,12 @@ jobs:
           touch "$XDG_CONFIG_HOME/dotfiles/is-work"
 
           # Create minimal work dotfiles structure (same layout as the personal repo).
-          # Only override one config entry to assert overlay selection.
+          # Override git for both base and darwin to test priority ordering.
           mkdir -p "$WORK_DOTFILES_ROOT/.config/git"
-          echo "work-overlay" > "$WORK_DOTFILES_ROOT/.config/git/CI_WORK_OVERLAY_MARKER"
+          echo "work-overlay-base" > "$WORK_DOTFILES_ROOT/.config/git/CI_WORK_OVERLAY_MARKER"
+
+          mkdir -p "$WORK_DOTFILES_ROOT/darwin/.config/git"
+          echo "work-overlay-darwin" > "$WORK_DOTFILES_ROOT/darwin/.config/git/CI_WORK_OVERLAY_DARWIN_MARKER"
 
       - name: dotlink link/status/unlink/prune (repo path)
         shell: bash
@@ -62,20 +65,41 @@ jobs:
           test -L "$XDG_CONFIG_HOME/nvim"
           test -L "$HOME/.zshenv"
 
-          # Overlay assertion (only when enabled).
+          # Overlay assertions.
           if [ "${{ matrix.work_overlay }}" = "true" ]; then
-            # Git config should be linked from work dotfiles when present.
-            got=$(readlink "$XDG_CONFIG_HOME/git")
-            exp="$WORK_DOTFILES_ROOT/.config/git"
-            test "$got" = "$exp"
+            if [ "${{ matrix.os }}" = "macos-latest" ]; then
+              exp="$WORK_DOTFILES_ROOT/darwin/.config/git"
+              marker="CI_WORK_OVERLAY_DARWIN_MARKER"
+            else
+              exp="$WORK_DOTFILES_ROOT/.config/git"
+              marker="CI_WORK_OVERLAY_MARKER"
+            fi
 
-            # And the marker file should be visible through the symlink.
-            test -f "$XDG_CONFIG_HOME/git/CI_WORK_OVERLAY_MARKER"
+            got=$(readlink "$XDG_CONFIG_HOME/git")
+            test "$got" = "$exp"
+            test -f "$XDG_CONFIG_HOME/git/$marker"
           else
             # When overlay is off, git should point to the personal repo.
+            if [ "${{ matrix.os }}" = "macos-latest" ] && [ -d "$(pwd)/darwin/.config/git" ]; then
+              exp="$(pwd)/darwin/.config/git"
+            else
+              exp="$(pwd)/.config/git"
+            fi
             got=$(readlink "$XDG_CONFIG_HOME/git")
-            exp="$(pwd)/.config/git"
             test "$got" = "$exp"
+          fi
+
+          # macOS-only configs should only link on macOS runners.
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            test -L "$XDG_CONFIG_HOME/hammerspoon"
+            test -L "$XDG_CONFIG_HOME/karabiner"
+            test -L "$XDG_CONFIG_HOME/yabai"
+            test -L "$LOCAL_BIN/install-mozc-macos"
+          else
+            test ! -e "$XDG_CONFIG_HOME/hammerspoon"
+            test ! -e "$XDG_CONFIG_HOME/karabiner"
+            test ! -e "$XDG_CONFIG_HOME/yabai"
+            test ! -e "$LOCAL_BIN/install-mozc-macos"
           fi
 
           # Status should succeed.
@@ -87,6 +111,12 @@ jobs:
             echo "status unexpectedly succeeded after unlink"
             exit 1
           fi
+
+          # Create a broken symlink pointing to darwin config and ensure prune removes it.
+          ln -s "$(pwd)/darwin/.config/does-not-exist" "$XDG_CONFIG_HOME/should-prune"
+          test -L "$XDG_CONFIG_HOME/should-prune"
+          ./bin/dotlink prune
+          test ! -e "$XDG_CONFIG_HOME/should-prune"
 
           # Prune should not error even if nothing to prune.
           ./bin/dotlink prune
