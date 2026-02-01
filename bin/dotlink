@@ -1,4 +1,21 @@
 #!/bin/sh
+
+# Symlink manager for this dotfiles repository.
+#
+# Layers (highest priority first):
+#   1) WORK_DOTFILES_ROOT/<os>/...
+#   2) WORK_DOTFILES_ROOT/...
+#   3) DOTFILES_ROOT/<os>/...
+#   4) DOTFILES_ROOT/...
+#
+# The first existing path wins. Nonexistent candidates still establish the
+# intended target path so that later creation stays consistent.
+#
+# Notes:
+#   * zsh bootstrap keeps ~/.zshenv linked from .config/zsh/.zshenv
+#   * Idempotent: running link/unlink repeatedly is safe
+#   * OS detection is limited to macOS (darwin) today; more can be added later
+
 set -eu
 
 # Resolve this script's real path (follow symlinks) so DOTFILES_ROOT is stable.
@@ -17,7 +34,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
 # shellcheck disable=SC1007
 DOTFILES_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
-WORK_DOTFILES_ROOT=${WORK_DOTFILES_ROOT:-"$HOME/work/dotfiles"}
+WORK_DOTFILES_ROOT=${WORK_DOTFILES_ROOT:-"$HOME/work/.dotfiles"}
 
 XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-"$HOME/.config"}
 LOCAL_BIN=${LOCAL_BIN:-"$HOME/.local/bin"}
@@ -31,10 +48,10 @@ Manage symlinks for dotfiles repository located at $DOTFILES_ROOT.
 Usage: $(basename "$0") <command>
 
 Commands:
-  link     Create symlinks (backs up existing files into $(dirname "$BACKUP_DIR"))
-  unlink   Remove symlinks created by dotlink (only current targets)
-  status   Check expected symlinks
-  prune    Remove broken symlinks that were pointing into dotfiles/work-dotfiles
+  link     create/replace symlinks, backing up real files into .backup/<ts>/
+  unlink   remove current symlinks managed by this script
+  status   report OK/MISS/DIFF/FILE for expected links
+  prune    delete broken symlinks that pointed into dotfiles/work-dotfiles
 EOF
 }
 
@@ -67,42 +84,55 @@ is_darwin() {
   "$DOTFILES_ROOT/bin/is-darwin"
 }
 
-# Resolve source path considering work overlay.
-#
-# Work overlay is enabled only when:
-# * the repo-local is-work script exists and reports "work machine", and
-# * $WORK_DOTFILES_ROOT exists, and
-# * the source path is within $DOTFILES_ROOT, and
-# * the corresponding path exists in $WORK_DOTFILES_ROOT.
-resolve_src() {
-  src=$1
+os_id() {
+  if is_darwin; then
+    printf "darwin"
+  else
+    printf ""
+  fi
+}
 
-  if [ ! -x "$DOTFILES_ROOT/bin/is-work" ]; then
-    printf '%s' "$src"
-    return 0
+is_work_machine() {
+  [ -x "$DOTFILES_ROOT/bin/is-work" ] && "$DOTFILES_ROOT/bin/is-work"
+}
+
+resolve_src_rel() {
+  rel=$1
+  os=$(os_id)
+
+  # Higher-priority candidates are appended first.
+  candidates=""
+
+  if is_work_machine && [ -d "$WORK_DOTFILES_ROOT" ]; then
+    if [ -n "$os" ]; then
+      candidates="$candidates $WORK_DOTFILES_ROOT/$os/$rel"
+    fi
+    candidates="$candidates $WORK_DOTFILES_ROOT/$rel"
   fi
 
-  # Call "$DOTFILES_ROOT/bin/is-work" directly to avoid depending on PATH
-  # during the first bootstrap run.
-  "$DOTFILES_ROOT/bin/is-work" || { printf '%s' "$src"; return 0; }
-  [ -d "$WORK_DOTFILES_ROOT" ] || { printf '%s' "$src"; return 0; }
+  if [ -n "$os" ]; then
+    candidates="$candidates $DOTFILES_ROOT/$os/$rel"
+  fi
 
-  case "$src" in
-    "$DOTFILES_ROOT"/*)
-      rel=${src#"$DOTFILES_ROOT"/}
-      src_work="$WORK_DOTFILES_ROOT/$rel"
-      if [ -e "$src_work" ]; then
-        printf '%s' "$src_work"
-        return 0
-      fi
-      ;;
-  esac
+  candidates="$candidates $DOTFILES_ROOT/$rel"
 
-  printf '%s' "$src"
+  for path in $candidates; do
+    if [ -e "$path" ]; then
+      printf '%s' "$path"
+      return 0
+    fi
+  done
+
+  # Fallback to the first candidate even if none exist yet.
+  for path in $candidates; do
+    printf '%s' "$path"
+    return 0
+  done
 }
 
 link_one() {
-  src=$(resolve_src "$1")
+  rel=$1
+  src=$(resolve_src_rel "$rel")
   dest=$2
 
   ensure_dir "$(dirname "$dest")"
@@ -120,7 +150,8 @@ unlink_one() {
 }
 
 status_one() {
-  src=$(resolve_src "$1")
+  rel=$1
+  src=$(resolve_src_rel "$rel")
   dest=$2
 
   if [ ! -e "$dest" ]; then
@@ -142,42 +173,47 @@ status_one() {
   return 1
 }
 
-# Enumerate entries under $DOTFILES_ROOT/.config and invoke callback as:
-#   callback <name> <src> <dest>
-#
-# This links the entire directory/file entry as-is (directory symlinks are fine).
-for_each_config_entry() {
-  cb=$1
-
-  for src in "$DOTFILES_ROOT/.config/"*; do
-    [ -e "$src" ] || continue
-    name=$(basename "$src")
-    dest="$XDG_CONFIG_HOME/$name"
-    "$cb" "$name" "$src" "$dest"
-  done
+collect_names() {
+  # Args: list of directories to scan. Emits basename per entry, one per line.
+  for dir in "$@"; do
+    [ -d "$dir" ] || continue
+    for entry in "$dir/"*; do
+      [ -e "$entry" ] || continue
+      basename "$entry"
+    done
+  done | sort -u
 }
 
-_cb_link_config() {
-  link_one "$2" "$3"
-}
+config_names() {
+  os=$(os_id)
+  dirs="$DOTFILES_ROOT/.config"
+  [ -n "$os" ] && dirs="$dirs $DOTFILES_ROOT/$os/.config"
 
-_cb_unlink_config() {
-  unlink_one "$3"
-}
+  if is_work_machine && [ -d "$WORK_DOTFILES_ROOT" ]; then
+    dirs="$dirs $WORK_DOTFILES_ROOT/.config"
+    [ -n "$os" ] && dirs="$dirs $WORK_DOTFILES_ROOT/$os/.config"
+  fi
 
-_cb_status_config() {
-  status_one "$2" "$3" || fail=1
+  # shellcheck disable=SC2086
+  collect_names $dirs
 }
 
 # Link all entries under .config/ into ~/.config/.
 link_config() {
   ensure_dir "$XDG_CONFIG_HOME"
 
-  for_each_config_entry _cb_link_config
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    rel=".config/$name"
+    dest="$XDG_CONFIG_HOME/$name"
+    link_one "$rel" "$dest"
+  done <<EOF
+$(config_names)
+EOF
 
   # zsh bootstrap: keep .zshenv in $HOME so ZDOTDIR works before ~/.config/zsh
   # is even consulted.
-  link_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv"
+  link_one ".config/zsh/.zshenv" "$HOME/.zshenv"
 }
 
 # Remove only the symlinks for entries that currently exist in this repo.
@@ -185,79 +221,77 @@ link_config() {
 # If a config entry was removed from the repo, the corresponding symlink might
 # remain; use "prune" to clean up broken leftovers.
 unlink_config() {
-  for_each_config_entry _cb_unlink_config
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    dest="$XDG_CONFIG_HOME/$name"
+    unlink_one "$dest"
+  done <<EOF
+$(config_names)
+EOF
   unlink_one "$HOME/.zshenv"
 }
 
 status_config() {
   fail=0
-  for_each_config_entry _cb_status_config
-  status_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv" || fail=1
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    rel=".config/$name"
+    dest="$XDG_CONFIG_HOME/$name"
+    status_one "$rel" "$dest" || fail=1
+  done <<EOF
+$(config_names)
+EOF
+  status_one ".config/zsh/.zshenv" "$HOME/.zshenv" || fail=1
   return "$fail"
 }
 
-# Link regular files under dotfiles/bin into ~/.local/bin.
-# Also link OS-specific scripts (e.g. bin/darwin/*) only on that OS.
+bin_names() {
+  os=$(os_id)
+  dirs="$DOTFILES_ROOT/bin"
+  [ -n "$os" ] && dirs="$dirs $DOTFILES_ROOT/$os/bin"
+
+  if is_work_machine && [ -d "$WORK_DOTFILES_ROOT" ]; then
+    dirs="$dirs $WORK_DOTFILES_ROOT/bin"
+    [ -n "$os" ] && dirs="$dirs $WORK_DOTFILES_ROOT/$os/bin"
+  fi
+
+  # shellcheck disable=SC2086
+  collect_names $dirs
+}
+
 link_bin() {
   ensure_dir "$LOCAL_BIN"
 
-  # Common scripts
-  for s in "$DOTFILES_ROOT/bin/"*; do
-    [ -f "$s" ] || continue
-    name=$(basename "$s")
-    link_one "$s" "$LOCAL_BIN/$name"
-  done
-
-  # macOS-only scripts
-  if is_darwin; then
-    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
-      [ -f "$s" ] || continue
-      name=$(basename "$s")
-      link_one "$s" "$LOCAL_BIN/$name"
-    done
-  fi
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    rel="bin/$name"
+    dest="$LOCAL_BIN/$name"
+    link_one "$rel" "$dest"
+  done <<EOF
+$(bin_names)
+EOF
 }
 
-# Remove only the symlinks for scripts that currently exist in dotfiles/bin.
-# For leftovers after removal, use "prune".
 unlink_bin() {
-  # Common scripts
-  for s in "$DOTFILES_ROOT/bin/"*; do
-    [ -f "$s" ] || continue
-    name=$(basename "$s")
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
     unlink_one "$LOCAL_BIN/$name"
-  done
-
-  # macOS-only scripts
-  if is_darwin; then
-    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
-      [ -f "$s" ] || continue
-      name=$(basename "$s")
-      unlink_one "$LOCAL_BIN/$name"
-    done
-  fi
+  done <<EOF
+$(bin_names)
+EOF
 }
 
 status_bin() {
   fail=0
 
-  # Common scripts
-  for s in "$DOTFILES_ROOT/bin/"*; do
-    [ -f "$s" ] || continue
-    name=$(basename "$s")
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    rel="bin/$name"
     dest="$LOCAL_BIN/$name"
-    status_one "$s" "$dest" || fail=1
-  done
-
-  # macOS-only scripts
-  if is_darwin; then
-    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
-      [ -f "$s" ] || continue
-      name=$(basename "$s")
-      dest="$LOCAL_BIN/$name"
-      status_one "$s" "$dest" || fail=1
-    done
-  fi
+    status_one "$rel" "$dest" || fail=1
+  done <<EOF
+$(bin_names)
+EOF
 
   return "$fail"
 }
@@ -268,56 +302,66 @@ status_bin() {
 # This approximates "remove configs deleted from dotfiles" because removing
 # a config entry from the repo typically breaks the corresponding symlink.
 prune_config() {
+  os=$(os_id)
+
+  config_prefixes="$DOTFILES_ROOT/.config $WORK_DOTFILES_ROOT/.config"
+  [ -n "$os" ] && config_prefixes="$config_prefixes $DOTFILES_ROOT/$os/.config $WORK_DOTFILES_ROOT/$os/.config"
+
   for p in "$XDG_CONFIG_HOME"/*; do
     [ -L "$p" ] || continue
     [ -e "$p" ] && continue
 
     target=$(readlink "$p" 2>/dev/null || true)
 
-    case "$target" in
-      "$DOTFILES_ROOT/.config/"* )
-        rm -f "$p"
-        say "prune  $p"
-        ;;
-      "$WORK_DOTFILES_ROOT/.config/"* )
-        rm -f "$p"
-        say "prune  $p"
-        ;;
-    esac
+    for prefix in $config_prefixes; do
+      case "$target" in
+        "$prefix"/*)
+          rm -f "$p"
+          say "prune  $p"
+          break
+          ;;
+      esac
+    done
   done
 
   # Also prune $HOME/.zshenv if it became a broken link pointing into dotfiles.
   if [ -L "$HOME/.zshenv" ] && [ ! -e "$HOME/.zshenv" ]; then
     target=$(readlink "$HOME/.zshenv" 2>/dev/null || true)
-    case "$target" in
-      "$DOTFILES_ROOT/.config/zsh/.zshenv" | "$WORK_DOTFILES_ROOT/.config/zsh/.zshenv" )
-        rm -f "$HOME/.zshenv"
-        say "prune  $HOME/.zshenv"
-        ;;
-    esac
+    for prefix in $config_prefixes; do
+      case "$target" in
+        "$prefix"/zsh/.zshenv)
+          rm -f "$HOME/.zshenv"
+          say "prune  $HOME/.zshenv"
+          break
+          ;;
+      esac
+    done
   fi
 }
 
 # Remove ONLY broken symlinks under ~/.local/bin that were pointing into
 # $DOTFILES_ROOT/bin/ or $WORK_DOTFILES_ROOT/bin/.
 prune_bin() {
+  os=$(os_id)
+
+  bin_prefixes="$DOTFILES_ROOT/bin $WORK_DOTFILES_ROOT/bin"
+  [ -n "$os" ] && bin_prefixes="$bin_prefixes $DOTFILES_ROOT/$os/bin $WORK_DOTFILES_ROOT/$os/bin"
+
   for p in "$LOCAL_BIN"/*; do
     [ -L "$p" ] || continue
     [ -e "$p" ] && continue
 
     target=$(readlink "$p" 2>/dev/null || true)
 
-    case "$target" in
-      # "$DOTFILES_ROOT/bin/"* also matches "$DOTFILES_ROOT/bin/<os>/"*.
-      "$DOTFILES_ROOT/bin/"* )
-        rm -f "$p"
-        say "prune  $p"
-        ;;
-      "$WORK_DOTFILES_ROOT/bin/"* )
-        rm -f "$p"
-        say "prune  $p"
-        ;;
-    esac
+    for prefix in $bin_prefixes; do
+      case "$target" in
+        "$prefix"/*)
+          rm -f "$p"
+          say "prune  $p"
+          break
+          ;;
+      esac
+    done
   done
 }
 
