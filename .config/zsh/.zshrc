@@ -22,8 +22,28 @@ unsetopt flow_control
 unsetopt list_beep
 
 # Prompt
-[ -f "$XDG_CONFIG_HOME/zsh/prompt.zsh" ] && . "$XDG_CONFIG_HOME/zsh/prompt.zsh"
+[ -f "$ZDOTDIR/prompt.zsh" ] && . "$ZDOTDIR/prompt.zsh"
 
+# Reload interactive zsh configuration on SIGUSR1.
+# This enables mass-reloading all running zsh instances (e.g. under tmux)
+# without manually sourcing in each pane.
+if [[ -o interactive ]]; then
+  TRAPUSR1() {
+    # Re-source the main zsh config.
+    source "$ZDOTDIR/.zshrc"
+
+    # If we're in ZLE, refresh prompt state and redraw.
+    # * __prompt_precmd updates gitstatus/vcs_info + PROMPT, but may be
+    #   undefined if prompt.zsh wasn't loaded for some reason; guard it.
+    # * reset-prompt redraws the current prompt immediately.
+    if [[ -n ${+ZLE} ]]; then
+      (( ${+functions[__prompt_precmd]} )) && __prompt_precmd 2>/dev/null || true
+      zle reset-prompt
+    fi
+  }
+fi
+
+# TODO: moigrate to .zprofile?
 # Auto-start tmux only on interactive TTY sessions.
 if [[ -z "$TMUX" ]] && cmd-exists tmux && [[ -t 0 ]]; then
   exec tmux new -As "stuff"

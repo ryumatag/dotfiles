@@ -112,10 +112,15 @@ GITSTATUS_PLUGIN_ZSH="$GITSTATUS_DIR/gitstatus.plugin.zsh"
 typeset -g __USE_GITSTATUS=0
 typeset -g __GIT_PROMPT_STR=""
 
+# Initialize gitstatus once at load time.
+#
+# On re-sourcing, explicitly stop any existing instance first to avoid
+# duplicate background processes or stale state.
 __gitstatus_init() {
   [[ -f "$GITSTATUS_PLUGIN_ZSH" ]] || return 1
   source "$GITSTATUS_PLUGIN_ZSH" || return 1
 
+  # Ensure a clean restart when this file is re-sourced.
   gitstatus_stop 'DOT' 2>/dev/null || true
   gitstatus_start -s -1 -u -1 -c -1 -d -1 'DOT' || return 1
 
@@ -201,5 +206,10 @@ __prompt_exit() {
   fi
 }
 
+# Hooks must not accumulate across re-sourcing. Remove existing hooks first,
+# then re-add them to guarantee exactly one registration even after multiple
+# reloads.
+add-zsh-hook -d precmd __prompt_precmd 2>/dev/null || true
+add-zsh-hook -d zshexit __prompt_exit 2>/dev/null || true
 add-zsh-hook precmd __prompt_precmd
 add-zsh-hook zshexit __prompt_exit
