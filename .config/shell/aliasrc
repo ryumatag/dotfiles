@@ -117,7 +117,7 @@ if is-darwin; then
     .Trash
   )
 
-  _LS_HOME_IGNORES_EZA="-I $(printf '%s|' "${_LS_HOME_JUNKS[@]}")"
+  _LS_HOME_IGNORES_EZA="$(printf '%s|' "${_LS_HOME_JUNKS[@]}")"
   _LS_HOME_IGNORES_LS="$(printf ' -I %s' "${_LS_HOME_JUNKS[@]}")"
 fi
 
@@ -129,7 +129,7 @@ if cmd-exists eza; then
         command eza --git \
           -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
       else
-        command eza --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+        command eza --git -I "${_LS_GLOBAL_IGNORES_EZA}" "$@"
       fi
     else
       command eza --git "$@"
@@ -142,7 +142,7 @@ if cmd-exists eza; then
         command eza -a --git \
           -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
       else
-        command eza -a --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+        command eza -a --git -I "${_LS_GLOBAL_IGNORES_EZA}" "$@"
       fi
     else
       command eza -a --git "$@"
@@ -155,7 +155,7 @@ if cmd-exists eza; then
         command eza -ahl --git \
           -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
       else
-        command eza -ahl --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+        command eza -ahl --git -I "${_LS_GLOBAL_IGNORES_EZA}" "$@"
       fi
     else
       command eza -ahl --git "$@"
