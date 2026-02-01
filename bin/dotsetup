@@ -1,12 +1,11 @@
 #!/bin/sh
-set -eu
 
 # Setup and update helper for this dotfiles repository.
 #
 # Responsibilities:
-# * Ensure the dotfiles repository is present and up to date
-# * Apply symlinks via dotlink
-# * Ensure Rust and required Cargo tools are installed
+#   * Ensure the dotfiles repository is present and up to date
+#   * Apply symlinks via dotlink
+#   * Ensure Rust and required Cargo tools are installed
 #
 # This script is intended to be idempotent: safe to run multiple times.
 #
@@ -19,6 +18,8 @@ set -eu
 # commands in ~/.local/bin or sourcing shell rc files (e.g. pathrc).
 # It must be able to run in a minimal environment (fresh machine, CI) where
 # PATH has not yet been customized by dotfiles.
+
+set -eu
 
 DOTFILES_ROOT=${DOTFILES_ROOT:-"$HOME/.dotfiles"}
 DOTFILES_REPO=${DOTFILES_REPO:-"https://github.com/ryumatag/dotfiles"}
