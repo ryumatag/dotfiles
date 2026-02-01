@@ -62,6 +62,11 @@ backup_if_needed() {
   fi
 }
 
+is_darwin() {
+  [ -x "$DOTFILES_ROOT/bin/is-darwin" ] || return 1
+  "$DOTFILES_ROOT/bin/is-darwin"
+}
+
 # Resolve source path considering work overlay.
 #
 # Work overlay is enabled only when:
@@ -161,7 +166,7 @@ _cb_unlink_config() {
 }
 
 _cb_status_config() {
-  status_one "$2" "$3" || FAIL=1
+  status_one "$2" "$3" || fail=1
 }
 
 # Link all entries under .config/ into ~/.config/.
@@ -185,41 +190,75 @@ unlink_config() {
 }
 
 status_config() {
-  FAIL=0
+  fail=0
   for_each_config_entry _cb_status_config
-  status_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv" || FAIL=1
-  return "$FAIL"
+  status_one "$DOTFILES_ROOT/.config/zsh/.zshenv" "$HOME/.zshenv" || fail=1
+  return "$fail"
 }
 
-# Link every regular file under dotfiles/bin into ~/.local/bin.
+# Link regular files under dotfiles/bin into ~/.local/bin.
+# Also link OS-specific scripts (e.g. bin/darwin/*) only on that OS.
 link_bin() {
   ensure_dir "$LOCAL_BIN"
 
+  # Common scripts
   for s in "$DOTFILES_ROOT/bin/"*; do
     [ -f "$s" ] || continue
     name=$(basename "$s")
     link_one "$s" "$LOCAL_BIN/$name"
   done
+
+  # macOS-only scripts
+  if is_darwin; then
+    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
+      [ -f "$s" ] || continue
+      name=$(basename "$s")
+      link_one "$s" "$LOCAL_BIN/$name"
+    done
+  fi
 }
 
 # Remove only the symlinks for scripts that currently exist in dotfiles/bin.
 # For leftovers after removal, use "prune".
 unlink_bin() {
+  # Common scripts
   for s in "$DOTFILES_ROOT/bin/"*; do
     [ -f "$s" ] || continue
     name=$(basename "$s")
     unlink_one "$LOCAL_BIN/$name"
   done
+
+  # macOS-only scripts
+  if is_darwin; then
+    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
+      [ -f "$s" ] || continue
+      name=$(basename "$s")
+      unlink_one "$LOCAL_BIN/$name"
+    done
+  fi
 }
 
 status_bin() {
   fail=0
+
+  # Common scripts
   for s in "$DOTFILES_ROOT/bin/"*; do
     [ -f "$s" ] || continue
     name=$(basename "$s")
     dest="$LOCAL_BIN/$name"
-    [ -L "$dest" ] || { say "MISS  $dest"; fail=1; }
+    status_one "$s" "$dest" || fail=1
   done
+
+  # macOS-only scripts
+  if is_darwin; then
+    for s in "$DOTFILES_ROOT/bin/darwin/"*; do
+      [ -f "$s" ] || continue
+      name=$(basename "$s")
+      dest="$LOCAL_BIN/$name"
+      status_one "$s" "$dest" || fail=1
+    done
+  fi
+
   return "$fail"
 }
 
@@ -269,6 +308,7 @@ prune_bin() {
     target=$(readlink "$p" 2>/dev/null || true)
 
     case "$target" in
+      # "$DOTFILES_ROOT/bin/"* also matches "$DOTFILES_ROOT/bin/<os>/"*.
       "$DOTFILES_ROOT/bin/"* )
         rm -f "$p"
         say "prune  $p"
