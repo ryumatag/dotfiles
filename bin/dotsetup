@@ -9,87 +9,118 @@ set -eu
 # * Ensure Rust and required Cargo tools are installed
 #
 # This script is intended to be idempotent: safe to run multiple times.
+#
+# Optional environment flags:
+#   DOTSETUP_SKIP_RUST=1   Skip installing/updating Rust toolchain
+#   DOTSETUP_SKIP_CARGO=1  Skip installing Cargo tools from cargo-install.txt
+#
+# Design note:
+# This script intentionally avoids relying on any user-installed helper
+# commands in ~/.local/bin or sourcing shell rc files (e.g. pathrc).
+# It must be able to run in a minimal environment (fresh machine, CI) where
+# PATH has not yet been customized by dotfiles.
 
-DOTFILES_DIR=${DOTFILES_DIR:-"$HOME/.dotfiles"}
+DOTFILES_ROOT=${DOTFILES_ROOT:-"$HOME/.dotfiles"}
 DOTFILES_REPO=${DOTFILES_REPO:-"https://github.com/ryumatag/dotfiles"}
-DOTLINK="$DOTFILES_DIR/bin/dotlink"
-CRATES_LIST_FILE="$DOTFILES_DIR/cargo-install.txt"
+
+CRATES_LIST_FILE="$DOTFILES_ROOT/cargo-install.txt"
+DOTLINK="$DOTFILES_ROOT/bin/dotlink"
+
+DOTSETUP_SKIP_RUST=${DOTSETUP_SKIP_RUST:-0}
+DOTSETUP_SKIP_CARGO=${DOTSETUP_SKIP_CARGO:-0}
 
 say() { printf "%s\n" "$*"; }
-
 die() { printf "error: %s\n" "$*" >&2; exit 1; }
 
+command -v git >/dev/null 2>&1 || die "missing command: git"
+
 # Clone or update dotfiles repository.
-if [ -d "$DOTFILES_DIR/.git" ]; then
-  say "dotfiles: updating $DOTFILES_DIR"
-  git -C "$DOTFILES_DIR" remote set-url origin "$DOTFILES_REPO" >/dev/null 2>&1 || true
-  git -C "$DOTFILES_DIR" fetch --prune origin
+if [ -d "$DOTFILES_ROOT/.git" ]; then
+  say "dotfiles: updating $DOTFILES_ROOT"
+  git -C "$DOTFILES_ROOT" remote set-url origin "$DOTFILES_REPO" >/dev/null 2>&1 || true
+  git -C "$DOTFILES_ROOT" fetch --prune origin
 
   # Prefer fast-forward only.
-  branch=$(git -C "$DOTFILES_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-  git -C "$DOTFILES_DIR" pull --ff-only origin "$branch"
+  # Use upstream if configured; otherwise fall back to origin/main.
+  if git -C "$DOTFILES_ROOT" rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
+    git -C "$DOTFILES_ROOT" pull --ff-only
+  else
+    git -C "$DOTFILES_ROOT" pull --ff-only origin main
+  fi
 else
-  say "dotfiles: cloning into $DOTFILES_DIR"
-  git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+  say "dotfiles: cloning into $DOTFILES_ROOT"
+  git clone "$DOTFILES_REPO" "$DOTFILES_ROOT"
 fi
 
-# Place scripts into ~/.local/bin, and set up XDG config symlinks.
+# Apply symlinks via dotlink (do not rely on PATH).
 [ -x "$DOTLINK" ] || die "dotlink not found or not executable: $DOTLINK"
 say "dotlink: linking"
 "$DOTLINK" link
 
-# Install Rust toolchain via rustup if missing.
-if command -v rustup >/dev/null 2>&1; then
-  say "rust: rustup already installed"
-  return 0
-fi
+# Ensure CARGO_HOME and make cargo/rustup visible without sourcing shell rc
+# files.
+export CARGO_HOME="${CARGO_HOME:=$HOME/.cargo}"
+mkdir -p "$CARGO_HOME/bin"
+export PATH="$CARGO_HOME/bin:$PATH"
 
-say "rust: installing rustup"
-
-# rustup installs to ~/.cargo and typically updates PATH via shell init.
-# We source nothing here; instead we try to use the installed binaries by
-# absolute paths.
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-if [ -x "$HOME/.cargo/bin/rustup" ]; then
-  "$HOME/.cargo/bin/rustup" default stable
-fi
-
-# Resolve cargo executable without relying on a newly loaded shell rc.
-if command -v cargo >/dev/null 2>&1; then
-  CARGO=cargo
-elif [ -x "$HOME/.cargo/bin/cargo" ]; then
-  CARGO="$HOME/.cargo/bin/cargo"
+# Rust toolchain (optional)
+if [ "$DOTSETUP_SKIP_RUST" = "1" ]; then
+  say "rust: skipped (DOTSETUP_SKIP_RUST=1)"
 else
+  if command -v rustup >/dev/null 2>&1; then
+    say "rust: rustup already installed"
+  else
+    command -v curl >/dev/null 2>&1 || die "missing command: curl"
+    say "rust: rustup not found; installing"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  fi
+
+  # Keep toolchain stable available and selected.
+  # (This is idempotent; repeated runs should be cheap.)
+  rustup toolchain install stable --no-self-update
+  rustup default stable
+fi
+
+# Cargo tools install (optional)
+SKIP_CARGO_INSTALL=0
+
+if [ "$DOTSETUP_SKIP_CARGO" = "1" ]; then
+  say "cargo: skipped (DOTSETUP_SKIP_CARGO=1)"
+  SKIP_CARGO_INSTALL=1
+fi
+
+if [ "$SKIP_CARGO_INSTALL" -eq 0 ] && ! command -v cargo >/dev/null 2>&1; then
   say "cargo: not found; skipping crate installs"
-  return 0
+  SKIP_CARGO_INSTALL=1
 fi
 
-if [ ! -f "$CRATES_LIST_FILE" ]; then
+if [ "$SKIP_CARGO_INSTALL" -eq 0 ] && [ ! -f "$CRATES_LIST_FILE" ]; then
   say "cargo: crates list not found; skipping: $CRATES_LIST_FILE"
-  return 0
+  SKIP_CARGO_INSTALL=1
 fi
 
-say "cargo: installing crates from $CRATES_LIST_FILE"
+if [ "$SKIP_CARGO_INSTALL" -eq 0 ]; then
+  say "cargo: installing crates from $CRATES_LIST_FILE"
 
-# Format: one crate per line.
-# * Empty lines and lines starting with # are ignored.
-# * Extra arguments per line are allowed (e.g., "--locked", "--features ...").
-#
-# Examples:
-#   ripgrep
-#   bat --locked
-#   cargo-edit --locked
-while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in
-    ""|\#*) continue ;;
-  esac
+  # Format: one crate per line.
+  # * Empty lines and lines starting with # are ignored.
+  # * Extra arguments per line are allowed (e.g., "--locked", "--features ...").
+  #
+  # Examples:
+  #   ripgrep
+  #   bat --locked
+  #   cargo-fuzz --locked
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ""|\#*) continue ;;
+    esac
 
-  # shellcheck disable=SC2086
-  set -- $line
-  crate=$1
-  shift || true
+    # shellcheck disable=SC2086
+    set -- $line
+    crate=$1
+    shift || true
 
-  say "cargo: install $crate $*"
-  "$CARGO" install "$crate" "$@"
-done <"$CRATES_LIST_FILE"
+    say "cargo: install $crate $*"
+    cargo install "$crate" "$@"
+  done <"$CRATES_LIST_FILE"
+fi
