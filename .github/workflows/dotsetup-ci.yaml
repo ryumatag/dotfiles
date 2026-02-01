@@ -1,0 +1,171 @@
+name: dotsetup ci
+
+on:
+  push:
+    paths:
+      - ".github/workflows/dotsetup-ci.yml"
+      - "bin/dotlink"
+      - "bin/dotsetup"
+      - "bin/is-work"
+      - "cargo-install.txt"
+  pull_request:
+    paths:
+      - ".github/workflows/dotsetup-ci.yml"
+      - "bin/dotlink"
+      - "bin/dotsetup"
+      - "bin/is-work"
+      - "cargo-install.txt"
+
+  # Manual trigger for running the full (slow) path any time.
+  workflow_dispatch:
+
+  # Scheduled full run (UTC). Adjust if you want a different cadence.
+  schedule:
+    - cron: "0 18 * * 0" # Sunday 18:00 UTC (Monday 03:00 JST)
+
+jobs:
+  dotsetup-smoke:
+    name: dotsetup smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        work_overlay: [false, true]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          # Avoid detached HEAD on pull_request so dotsetup's git pull works.
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Prepare fake HOME
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_home"
+          mkdir -p "$GITHUB_WORKSPACE/_workdotfiles/.config"
+
+      - name: Prepare work overlay fixture (only when enabled)
+        if: ${{ matrix.work_overlay == true }}
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+
+          # Enable "work machine" detection (is-work checks this marker).
+          mkdir -p "$XDG_CONFIG_HOME/dotfiles"
+          touch "$XDG_CONFIG_HOME/dotfiles/is-work"
+
+          # Minimal work dotfiles overlay with the same layout as the personal
+          # repo.
+          mkdir -p "$WORK_DOTFILES_ROOT/.config/git"
+          echo "work-overlay" > "$WORK_DOTFILES_ROOT/.config/git/CI_WORK_OVERLAY_MARKER"
+
+      - name: Run dotsetup (smoke)
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          DOTFILES_ROOT: ${{ github.workspace }}
+          DOTFILES_REPO: ${{ github.repositoryUrl }}
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+          DOTSETUP_SKIP_RUST: "1"
+          DOTSETUP_SKIP_CARGO: "1"
+        run: |
+          set -euxo pipefail
+
+          # Run twice to assert idempotency (should not fail).
+          ./bin/dotsetup
+          ./bin/dotsetup
+
+          # Basic sanity: dotlink should have created expected links.
+          test -L "$HOME/.local/bin/dotlink"
+          test -L "$XDG_CONFIG_HOME/zsh"
+          test -L "$HOME/.zshenv"
+
+          # Overlay assertion only when enabled.
+          if [ "${{ matrix.work_overlay }}" = "true" ]; then
+            got=$(readlink "$XDG_CONFIG_HOME/git")
+            exp="$WORK_DOTFILES_ROOT/.config/git"
+            test "$got" = "$exp"
+            test -f "$XDG_CONFIG_HOME/git/CI_WORK_OVERLAY_MARKER"
+          fi
+
+  dotsetup-full:
+    name: dotsetup full (rust + cargo)
+    runs-on: ubuntu-latest
+
+    # Run the slow path only on:
+    # * manual dispatch
+    # * schedule
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Prepare fake HOME
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/_home"
+          mkdir -p "$GITHUB_WORKSPACE/_workdotfiles/.config"
+
+      - name: Prepare work overlay fixture
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+          mkdir -p "$XDG_CONFIG_HOME/dotfiles"
+          touch "$XDG_CONFIG_HOME/dotfiles/is-work"
+
+          mkdir -p "$WORK_DOTFILES_ROOT/.config/git"
+          echo "work-overlay" > "$WORK_DOTFILES_ROOT/.config/git/CI_WORK_OVERLAY_MARKER"
+
+      - name: Cache Rust/Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/git
+            ~/.cargo/registry
+            ~/.rustup
+          key: rust-cargo-${{ runner.os }}-${{ hashFiles('cargo-install.txt') }}
+          restore-keys: |
+            rust-cargo-${{ runner.os }}-
+
+      - name: Run dotsetup (full)
+        shell: bash
+        env:
+          HOME: ${{ github.workspace }}/_home
+          XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
+          DOTFILES_ROOT: ${{ github.workspace }}
+          DOTFILES_REPO: ${{ github.repositoryUrl }}
+          WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
+        run: |
+          set -euxo pipefail
+
+          ./bin/dotsetup
+
+          # Sanity checks: rustup/cargo should be available in this mode.
+          command -v rustup
+          command -v cargo
+
+          # Overlay should be applied on the full run too.
+          got=$(readlink "$XDG_CONFIG_HOME/git")
+          exp="$WORK_DOTFILES_ROOT/.config/git"
+          test "$got" = "$exp"
+          test -f "$XDG_CONFIG_HOME/git/CI_WORK_OVERLAY_MARKER"
