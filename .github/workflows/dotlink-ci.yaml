@@ -1,4 +1,4 @@
-name: ci
+name: dotlink ci
 
 on:
   push:
