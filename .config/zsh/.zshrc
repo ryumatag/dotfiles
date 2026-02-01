@@ -104,16 +104,31 @@ elif [ -d /usr/local/share/zsh-completions ]; then
   fpath=( /usr/local/share/zsh-completions $fpath )
 fi
 
-[ -d "${XDG_CACHE_HOME}/zsh" ] || mkdir -p "${XDG_CACHE_HOME}/zsh"
-autoload -Uz compinit
-zcompdump="${XDG_CACHE_HOME}/zsh/zcompdump"
-if [ -f "$zcompdump" ]; then
-  compinit -C -d "$zcompdump"
-else
-  compinit -d "$zcompdump"
-fi
+zstyle ':completion:*' completer _complete _prefix _files
+zstyle ':completion:*' menu select=1
+zstyle ':completion:*:descriptions' format 'completing %d:'
+zstyle ':completion:*' group-name ''
 zstyle ":completion:*:commands" rehash 1
-zstyle ":completion:*:default" menu select=1
+
+_zcompdump="${XDG_CACHE_HOME}/zsh/zcompdump"
+[ -d "${_zcompdump:h}" ] || mkdir -p "${_zcompdump:h}"
+autoload -Uz compinit
+# Use cached completion dump if it's newer than 24h; else regenerate.
+# Exit behavior:
+# * regenerate: compinit -d (writes dump)
+# * cache ok  : compinit -C -d (skip recomp if possible)
+if [[ ! -f "$_zcompdump" ]]; then
+  compinit -d "$_zcompdump"
+else
+  # GNU stat: %Y = mtime as epoch seconds
+  _mtime=$(stat -c %Y "$_zcompdump" 2>/dev/null) || _mtime=0
+
+  if (( EPOCHSECONDS - _mtime >= 86400 )); then
+    compinit -d "$_zcompdump"
+  else
+    compinit -C -d "$_zcompdump"
+  fi
+fi
 
 # Autosuggestions
 for plugin in \
