@@ -43,12 +43,6 @@ if [[ -o interactive ]]; then
   }
 fi
 
-# TODO: moigrate to .zprofile?
-# Auto-start tmux only on interactive TTY sessions.
-if [[ -z "$TMUX" ]] && cmd-exists tmux && [[ -t 0 ]]; then
-  exec tmux new -As "stuff"
-fi
-
 # fzf integration (zsh)
 if cmd-exists fzf; then
   eval "$(fzf --zsh | sed 's/\^T/\^X/g')"
