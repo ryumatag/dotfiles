@@ -95,24 +95,53 @@ zle -N show-buffers
 bindkey "^[o" show-buffers
 
 # Completions
+fpath=( "${XDG_DATA_HOME}/zsh/completions" $fpath )
 if [ -n "${HOMEBREW_PREFIX-}" ] && [ -d "${HOMEBREW_PREFIX}/share/zsh-completions" ]; then
   fpath=( "${HOMEBREW_PREFIX}/share/zsh-completions" $fpath )
+elif [ -d /opt/homebrew/share/zsh-completions ]; then
+  fpath=( /opt/homebrew/share/zsh-completions $fpath )
+elif [ -d /usr/local/share/zsh-completions ]; then
+  fpath=( /usr/local/share/zsh-completions $fpath )
 fi
 
 [ -d "${XDG_CACHE_HOME}/zsh" ] || mkdir -p "${XDG_CACHE_HOME}/zsh"
-autoload -Uz compinit && compinit -d "${XDG_CACHE_HOME}/zsh/zcompdump"
+autoload -Uz compinit
+zcompdump="${XDG_CACHE_HOME}/zsh/zcompdump"
+if [ -f "$zcompdump" ]; then
+  compinit -C -d "$zcompdump"
+else
+  compinit -d "$zcompdump"
+fi
 zstyle ":completion:*:commands" rehash 1
 zstyle ":completion:*:default" menu select=1
 
-# Autosuggestions (Homebrew-provided)
-if [ -n "${HOMEBREW_PREFIX-}" ] && \
-   [ -r "${HOMEBREW_PREFIX}/share/zsh-autosuggestions/zsh-autosuggestions.zsh" ]; then
-  . "${HOMEBREW_PREFIX}/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-fi
+# Autosuggestions
+for plugin in \
+  "${XDG_DATA_HOME}/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+  ${HOMEBREW_PREFIX:+$HOMEBREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh} \
+  /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+  /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+  /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh \
+  /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+do
+  if [ -r "$plugin" ]; then
+    . "$plugin"
+    break
+  fi
+done
 
-# Syntax highlighting (must be sourced at the end of .zshrc)
+# Syntax highlighting
 zle_highlight=( region:bg=11 )
-if [ -n "${HOMEBREW_PREFIX-}" ] && \
-   [ -r "${HOMEBREW_PREFIX}/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]; then
-  . "${HOMEBREW_PREFIX}/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-fi
+for plugin in \
+  "${XDG_DATA_HOME}/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" \
+  ${HOMEBREW_PREFIX:+$HOMEBREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh} \
+  /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh \
+  /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh \
+  /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh \
+  /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+do
+  if [ -r "$plugin" ]; then
+    . "$plugin"
+    break
+  fi
+done
