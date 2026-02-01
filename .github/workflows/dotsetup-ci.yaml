@@ -3,14 +3,14 @@ name: dotsetup ci
 on:
   push:
     paths:
-      - ".github/workflows/dotsetup-ci.yml"
+      - ".github/workflows/dotsetup-ci.yaml"
       - "bin/dotlink"
       - "bin/dotsetup"
       - "bin/is-work"
       - "cargo-install.txt"
   pull_request:
     paths:
-      - ".github/workflows/dotsetup-ci.yml"
+      - ".github/workflows/dotsetup-ci.yaml"
       - "bin/dotlink"
       - "bin/dotsetup"
       - "bin/is-work"
@@ -73,7 +73,7 @@ jobs:
           HOME: ${{ github.workspace }}/_home
           XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
           DOTFILES_ROOT: ${{ github.workspace }}
-          DOTFILES_REPO: ${{ github.repositoryUrl }}
+          DOTFILES_REPO: https://github.com/${{ github.repository }}.git
           WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
           DOTSETUP_SKIP_RUST: "1"
           DOTSETUP_SKIP_CARGO: "1"
@@ -153,7 +153,7 @@ jobs:
           HOME: ${{ github.workspace }}/_home
           XDG_CONFIG_HOME: ${{ github.workspace }}/_home/.config
           DOTFILES_ROOT: ${{ github.workspace }}
-          DOTFILES_REPO: ${{ github.repositoryUrl }}
+          DOTFILES_REPO: https://github.com/${{ github.repository }}.git
           WORK_DOTFILES_ROOT: ${{ github.workspace }}/_workdotfiles
         run: |
           set -euxo pipefail
