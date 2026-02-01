@@ -106,11 +106,30 @@ __character_segment() {
 # Git segment: gitstatus preferred, vcs_info fallback
 
 : "${XDG_DATA_HOME:=$HOME/.local/share}"
-GITSTATUS_DIR="$XDG_DATA_HOME/zsh-plugins/gitstatus"
+GITSTATUS_DIR="$XDG_DATA_HOME/zsh/plugins/gitstatus"
 GITSTATUS_PLUGIN_ZSH="$GITSTATUS_DIR/gitstatus.plugin.zsh"
 
 typeset -g __USE_GITSTATUS=0
 typeset -g __GIT_PROMPT_STR=""
+# Cache the last git root we detected via filesystem checks.
+# This is used to avoid calling gitstatus_query when we're clearly outside a
+# repo.
+typeset -g __GITSTATUS_ROOT=""
+
+# Fast git root detection without spawning git.
+# Walk up parent directories looking for ".git" (dir or file for
+# worktrees/submodules).
+__git_root_fast() {
+  local dir="$PWD"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -e "$dir/.git" ]]; then
+      print -r -- "$dir"
+      return 0
+    fi
+    dir="${dir:h}"
+  done
+  return 1
+}
 
 # Initialize gitstatus once at load time.
 #
@@ -131,6 +150,24 @@ __gitstatus_init() {
 __gitstatus_update() {
   __GIT_PROMPT_STR=""
   (( __USE_GITSTATUS )) || return 0
+
+  # Avoid calling gitstatus_query when we're outside a git repo.
+  # First, reuse cached root if PWD is still under it.
+  local root=""
+  if [[ -n "$__GITSTATUS_ROOT" && "$PWD" == "$__GITSTATUS_ROOT"(|/*) ]]; then
+    root="$__GITSTATUS_ROOT"
+  else
+    root="$(__git_root_fast 2>/dev/null)" || root=""
+    __GITSTATUS_ROOT="$root"
+  fi
+
+  # Not in a repo: skip query and clear stale gitstatus state so other segments
+  # (e.g. directory display) won't accidentally treat us as in-repo.
+  if [[ -z "$root" ]]; then
+    VCS_STATUS_RESULT=""
+    VCS_STATUS_WORKDIR=""
+    return 0
+  fi
 
   gitstatus_query 'DOT' || return 0
   [[ "$VCS_STATUS_RESULT" == ok-sync ]] || return 0
