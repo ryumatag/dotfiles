@@ -97,40 +97,81 @@ __ls_is_home_target() {
 
 # Base ls options
 _LS_BASE_OPTS='-N --color=auto --group-directories-first'
-# Home directory entries to hide (macOS junk folders)
-_LS_HOME_IGNORES_EZA='Desktop|Documents|Downloads|Library|Movies|Music|Pictures|Public|.CFUserTextEncoding|.DS_Store|.Trash|'
-_LS_HOME_IGNORES_LS='-I Desktop -I Documents -I Downloads -I Library -I Movies -I Music -I Pictures -I Public -I .CFUserTextEncoding -I .DS_Store -I .Trash'
+
+if is-darwin; then
+  # Always-ignored entries (macOS)
+  _LS_GLOBAL_IGNORES_EZA='.DS_Store|'
+  _LS_GLOBAL_IGNORES_LS=' -I .DS_Store'
+
+  # Home directory entries to hide (macOS junk folders)
+  _LS_HOME_JUNKS=(
+    Desktop
+    Documents
+    Downloads
+    Library
+    Movies
+    Music
+    Pictures
+    Public
+    .CFUserTextEncoding
+    .Trash
+  )
+
+  _LS_HOME_IGNORES_EZA="-I $(printf '%s|' "${_LS_HOME_JUNKS[@]}")"
+  _LS_HOME_IGNORES_LS="$(printf ' -I %s' "${_LS_HOME_JUNKS[@]}")"
+fi
 
 # ls / la / ll (eza preferred)
 if cmd-exists eza; then
   ls() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      command eza --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        command eza --git \
+          -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
+      else
+        command eza --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+      fi
     else
       command eza --git "$@"
     fi
   }
 
   la() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      command eza -a --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        command eza -a --git \
+          -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
+      else
+        command eza -a --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+      fi
     else
       command eza -a --git "$@"
     fi
   }
 
   ll() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      command eza -ahl --git -I "$_LS_HOME_IGNORES_EZA" "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        command eza -ahl --git \
+          -I "${_LS_GLOBAL_IGNORES_EZA}${_LS_HOME_IGNORES_EZA}" "$@"
+      else
+        command eza -ahl --git "${_LS_GLOBAL_IGNORES_EZA}" "$@"
+      fi
     else
       command eza -ahl --git "$@"
     fi
   }
 else
   ls() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      # shellcheck disable=SC2086
-      command ls $_LS_BASE_OPTS $_LS_HOME_IGNORES_LS "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        # shellcheck disable=SC2086
+        command ls $_LS_BASE_OPTS \
+          $_LS_GLOBAL_IGNORES_LS $_LS_HOME_IGNORES_LS "$@"
+      else
+        # shellcheck disable=SC2086
+        command ls $_LS_BASE_OPTS $_LS_GLOBAL_IGNORES_LS "$@"
+      fi
     else
       # shellcheck disable=SC2086
       command ls $_LS_BASE_OPTS "$@"
@@ -138,18 +179,30 @@ else
   }
 
   la() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      # shellcheck disable=SC2086
-      command ls -a $_LS_HOME_IGNORES_LS "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        # shellcheck disable=SC2086
+        command ls -a \
+          $_LS_GLOBAL_IGNORES_LS $_LS_HOME_IGNORES_LS "$@"
+      else
+        # shellcheck disable=SC2086
+        command ls -a $_LS_GLOBAL_IGNORES_LS "$@"
+      fi
     else
       command ls -a "$@"
     fi
   }
 
   ll() {
-    if is-darwin && __ls_is_home_target "$@"; then
-      # shellcheck disable=SC2086
-      command ls -ahl $_LS_HOME_IGNORES_LS "$@"
+    if is-darwin; then
+      if __ls_is_home_target "$@"; then
+        # shellcheck disable=SC2086
+        command ls -ahl \
+          $_LS_GLOBAL_IGNORES_LS $_LS_HOME_IGNORES_LS "$@"
+      else
+        # shellcheck disable=SC2086
+        command ls -ahl $_LS_GLOBAL_IGNORES_LS "$@"
+      fi
     else
       command ls -ahl "$@"
     fi
