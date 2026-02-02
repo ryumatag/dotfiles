@@ -1,7 +1,14 @@
-# Load shared path/aliases/env (shared files are bash/zsh compatible).
+# Shared path/env are needed even for non-interactive shells.
 [ -f "$HOME/.config/shell/pathrc" ] && . "$HOME/.config/shell/pathrc"
-[ -f "$HOME/.config/shell/aliasrc" ] && . "$HOME/.config/shell/aliasrc"
 [ -f "$HOME/.config/shell/envrc" ] && . "$HOME/.config/shell/envrc"
+
+# If not running interactively, don't do anything more.
+if ! [[ -o interactive ]]; then
+  return
+fi
+
+# Aliases are interactive-only to avoid surprising behavior in `zsh -c ...`.
+[ -f "$HOME/.config/shell/aliasrc" ] && . "$HOME/.config/shell/aliasrc"
 
 # Zsh options
 setopt appendhistory
@@ -21,27 +28,33 @@ setopt nonomatch
 unsetopt flow_control
 unsetopt list_beep
 
-# Prompt
-[ -f "$ZDOTDIR/prompt.zsh" ] && . "$ZDOTDIR/prompt.zsh"
+# SIGUSR1-triggered config reload (deferred).
+#
+# Strategy:
+# - The signal trap only marks a reload request.
+# - The actual reload runs at the next prompt (precmd), when it's safe.
+#   This avoids breaking foreground apps (nvim/ssh/less/etc).
+#
+# The actual reload is performed by __prompt_precmd in prompt.zsh.
+(( ${+__ZRELOAD_PENDING} ))     || typeset -g __ZRELOAD_PENDING=0
+(( ${+__ZRELOAD_IN_PROGRESS} )) || typeset -g __ZRELOAD_IN_PROGRESS=0
 
-# Reload interactive zsh configuration on SIGUSR1.
-# This enables mass-reloading all running zsh instances (e.g. under tmux)
-# without manually sourcing in each pane.
-if [[ -o interactive ]]; then
-  TRAPUSR1() {
-    # Re-source the main zsh config.
-    source "$ZDOTDIR/.zshrc"
-
-    # If we're in ZLE, refresh prompt state and redraw.
-    # * __prompt_precmd updates gitstatus/vcs_info + PROMPT, but may be
-    #   undefined if prompt.zsh wasn't loaded for some reason; guard it.
-    # * reset-prompt redraws the current prompt immediately.
-    if [[ -n ${+ZLE} ]]; then
-      (( ${+functions[__prompt_precmd]} )) && __prompt_precmd 2>/dev/null || true
-      zle reset-prompt
-    fi
+__zreload_apply() {
+  (( __ZRELOAD_IN_PROGRESS )) && return 0
+  __ZRELOAD_IN_PROGRESS=1
+  {
+    . "$ZDOTDIR/.zshrc"
+  } always {
+    __ZRELOAD_IN_PROGRESS=0
   }
-fi
+}
+
+TRAPUSR1() {
+  __ZRELOAD_PENDING=1
+}
+
+# Prompt (defines __prompt_precmd and registers precmd hook)
+[ -f "$ZDOTDIR/prompt.zsh" ] && . "$ZDOTDIR/prompt.zsh"
 
 # fzf integration (zsh)
 if cmd-exists fzf; then

@@ -226,6 +226,12 @@ __build_prompt() {
 __gitstatus_init || __USE_GITSTATUS=0
 
 __prompt_precmd() {
+  # Apply deferred reload requested via SIGUSR1.
+  if (( ${+__ZRELOAD_PENDING} && __ZRELOAD_PENDING )); then
+    __ZRELOAD_PENDING=0
+    (( ${+functions[__zreload_apply]} )) && __zreload_apply 2>/dev/null || true
+  fi
+
   __PROMPT_LAST_STATUS=$?
 
   if (( __USE_GITSTATUS )); then
